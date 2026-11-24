@@ -1,8 +1,16 @@
-import type { User } from 'firebase/auth';
+import { deleteApp, getApps, initializeApp } from 'firebase/app';
+import {
+  getAuth,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signOut,
+  type User,
+} from 'firebase/auth';
 import {
   deleteDoc,
   doc,
   getDoc,
+  getFirestore,
   onSnapshot,
   runTransaction,
   serverTimestamp,
@@ -2679,4 +2687,234 @@ export async function importCartelBackupSnapshot(
     }
   }
 }
+
+interface ExternalFirebaseConfig {
+  projectId: string;
+  appId: string;
+  apiKey: string;
+  authDomain: string;
+  firestoreDatabaseId?: string;
+}
+
+function parseExternalFirebaseConfig(rawInput: string): ExternalFirebaseConfig {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawInput.trim());
+  } catch {
+    throw new Error(
+      'Configuration Firebase JSON invalide. Collez le contenu complet du fichier firebase-applet-config.json.'
+    );
+  }
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error('Configuration Firebase JSON invalide.');
+  }
+  const obj = parsed as Record<string, unknown>;
+  const projectId = typeof obj.projectId === 'string' ? obj.projectId.trim() : '';
+  const appId = typeof obj.appId === 'string' ? obj.appId.trim() : '';
+  const apiKey = typeof obj.apiKey === 'string' ? obj.apiKey.trim() : '';
+  const authDomain = typeof obj.authDomain === 'string' ? obj.authDomain.trim() : '';
+  const firestoreDatabaseId =
+    typeof obj.firestoreDatabaseId === 'string' ? obj.firestoreDatabaseId.trim() : '';
+
+  if (!projectId || !appId || !apiKey || !authDomain) {
+    throw new Error(
+      'Champs requis manquants dans la configuration (projectId, appId, apiKey, authDomain).'
+    );
+  }
+
+  return {
+    projectId,
+    appId,
+    apiKey,
+    authDomain,
+    ...(firestoreDatabaseId ? { firestoreDatabaseId } : {}),
+  };
+}
+
+export async function fetchBackupFromExternalFirebase(
+  rawConfigJson: string
+): Promise<{
+  snapshot: CartelBackupSnapshot;
+  preview: CartelBackupPreview;
+  sourceProjectId: string;
+  sourceAccountEmail: string;
+}> {
+  const cfg = parseExternalFirebaseConfig(rawConfigJson);
+  const appName = 'los-cerberos-migration-source';
+
+  const existingApp = getApps().find((a) => a.name === appName);
+  if (existingApp) {
+    await deleteApp(existingApp).catch(() => {});
+  }
+
+  const sourceApp = initializeApp(
+    {
+      projectId: cfg.projectId,
+      appId: cfg.appId,
+      apiKey: cfg.apiKey,
+      authDomain: cfg.authDomain,
+    },
+    appName
+  );
+  const sourceAuth = getAuth(sourceApp);
+  const sourceDb = cfg.firestoreDatabaseId
+    ? getFirestore(sourceApp, cfg.firestoreDatabaseId)
+    : getFirestore(sourceApp);
+
+  try {
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+
+    let sourceEmail = '';
+    try {
+      const cred = await signInWithPopup(sourceAuth, provider);
+      sourceEmail = cred.user.email || '';
+    } catch (error) {
+      const code =
+        error && typeof error === 'object' && 'code' in error
+          ? String((error as { code?: string }).code)
+          : '';
+      if (code === 'auth/unauthorized-domain') {
+        const host = window.location.hostname;
+        throw new Error(
+          `Domaine non autorisé sur l'ancien projet (${cfg.projectId}). Ajoutez "${host}" dans Firebase Console (${cfg.projectId}) > Authentication > Paramètres > Domaines autorisés avec votre ancien compte Google, attendez 30s puis réessayez.`
+        );
+      }
+      if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+        throw new Error('Connexion annulée.');
+      }
+      if (code === 'auth/popup-blocked') {
+        throw new Error(
+          'La fenêtre Google a été bloquée par le navigateur. Autorisez les pop-ups puis réessayez.'
+        );
+      }
+      throw new Error(
+        `Échec de connexion à l'ancien projet Firebase${code ? ` (${code})` : ''}.`
+      );
+    }
+
+    let snaps;
+    try {
+      snaps = await Promise.all([
+        getDoc(doc(sourceDb, 'cartels', CARTEL_ID, 'state', 'missions')),
+        getDoc(doc(sourceDb, 'cartels', CARTEL_ID, 'state', 'inventory')),
+        getDoc(doc(sourceDb, 'cartels', CARTEL_ID, 'state', 'treasury')),
+        getDoc(doc(sourceDb, 'cartels', CARTEL_ID, 'state', 'hierarchy')),
+        getDoc(doc(sourceDb, 'cartels', CARTEL_ID, 'state', 'catalog')),
+        getDoc(doc(sourceDb, 'cartels', CARTEL_ID, 'state', 'album')),
+        getDoc(doc(sourceDb, 'cartels', CARTEL_ID, 'state', 'history')),
+      ]);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      if (msg.toLowerCase().includes('permission')) {
+        throw new Error(
+          `Accès refusé sur l'ancienne base (${cfg.projectId}) avec le compte ${sourceEmail || 'sélectionné'}. Reconnectez-vous en choisissant le compte administrateur de l'ancien projet (ex. s.voirin63@gmail.com).`
+        );
+      }
+      throw new Error(`Impossible de lire l'ancienne base Firebase : ${msg}`);
+    }
+
+    const [missionsSnap, invSnap, treasSnap, hierSnap, catSnap, albumSnap, histSnap] = snaps;
+    if (!missionsSnap.exists() && !invSnap.exists() && !treasSnap.exists()) {
+      throw new Error(
+        `Aucune donnée Los Cerberos trouvée dans le projet "${cfg.projectId}". Vérifiez l'ID de base de données.`
+      );
+    }
+
+    const missionsData = missionsSnap.exists()
+      ? (missionsSnap.data() as Record<string, unknown>)
+      : {};
+    const invData = invSnap.exists() ? (invSnap.data() as Record<string, unknown>) : {};
+    const treasData = treasSnap.exists() ? (treasSnap.data() as Record<string, unknown>) : {};
+    const hierData = hierSnap.exists() ? (hierSnap.data() as Record<string, unknown>) : {};
+    const catData = catSnap.exists() ? (catSnap.data() as Record<string, unknown>) : {};
+    const albumData = albumSnap.exists() ? (albumSnap.data() as Record<string, unknown>) : {};
+    const histData = histSnap.exists() ? (histSnap.data() as Record<string, unknown>) : {};
+
+    const cleanAlbum = sanitizeAlbumState({
+      photos: albumData.photos,
+      favorites: albumData.favorites,
+    });
+
+    const albumMedia: Record<string, CartelBackupMediaEntry> = {};
+    const mediaIds = Array.from(
+      new Set(
+        Object.values(cleanAlbum.photos)
+          .map((photo) => photo.mediaId?.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64))
+          .filter((id): id is string => Boolean(id))
+      )
+    ).slice(0, 100);
+
+    await Promise.all(
+      mediaIds.map(async (mediaId) => {
+        try {
+          const mediaSnap = await getDoc(
+            doc(sourceDb, 'cartels', CARTEL_ID, 'albumMedia', mediaId)
+          );
+          if (!mediaSnap.exists()) return;
+          const m = mediaSnap.data() as Record<string, unknown>;
+          const imageUrl = typeof m.imageUrl === 'string' ? m.imageUrl : '';
+          const mimeType =
+            typeof m.mimeType === 'string' && m.mimeType
+              ? m.mimeType.slice(0, 40)
+              : 'image/jpeg';
+          if (imageUrl.length >= 1 && imageUrl.length <= 700000) {
+            albumMedia[mediaId] = { imageUrl, mimeType };
+          }
+        } catch {
+          // Ignore individual missing media items
+        }
+      })
+    );
+
+    const { snapshot, preview } = parseCartelBackupSnapshot({
+      schemaVersion: 1,
+      exportedAt: new Date().toISOString(),
+      cartelId: CARTEL_ID,
+      missions: {
+        week: missionsData.week,
+        entries: missionsData.entries,
+        scheduleOverrides: missionsData.scheduleOverrides,
+        unplacedMissionIds: missionsData.unplacedMissionIds,
+        lastRecalcDate: missionsData.lastRecalcDate,
+        lastRecalcAt: missionsData.lastRecalcAt,
+      },
+      inventory: {
+        stock: invData.stock,
+        prices: invData.prices,
+        weapons: invData.weapons,
+      },
+      treasury: {
+        legal: treasData.legal,
+        illegal: treasData.illegal,
+        rewards: treasData.rewards,
+        weaponsLossAmount: treasData.weaponsLossAmount,
+      },
+      hierarchy: {
+        members: membersMapToArray(hierData.members),
+        rankings: hierData.rankings,
+      },
+      catalog: {
+        groups: catData.groups,
+      },
+      album: cleanAlbum,
+      albumMedia,
+      history: {
+        archives: histData.archives,
+        currentPayroll: histData.currentPayroll,
+      },
+    });
+
+    return {
+      snapshot,
+      preview,
+      sourceProjectId: cfg.projectId,
+      sourceAccountEmail: sourceEmail,
+    };
+  } finally {
+    await signOut(sourceAuth).catch(() => {});
+    await deleteApp(sourceApp).catch(() => {});
+  }
+}
+
 
