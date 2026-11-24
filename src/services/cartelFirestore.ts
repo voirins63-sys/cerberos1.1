@@ -2089,7 +2089,7 @@ export const DISCORD_WEBHOOK_URL_REGEX =
 
 export const DEFAULT_DISCORD_CONFIG: DiscordGazetteConfig = {
   webhookUrl: '',
-  autoEnabled: false,
+  autoEnabled: true,
   sendHour: 9,
   sendMinute: 30,
   includePhoto: true,
@@ -2128,7 +2128,7 @@ export function sanitizeDiscordConfig(raw: unknown): DiscordGazetteConfig {
 
   return {
     webhookUrl,
-    autoEnabled: Boolean(obj.autoEnabled),
+    autoEnabled: obj.autoEnabled === undefined ? true : Boolean(obj.autoEnabled),
     sendHour,
     sendMinute,
     includePhoto: obj.includePhoto === undefined ? true : Boolean(obj.includePhoto),

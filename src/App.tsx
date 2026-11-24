@@ -8,7 +8,6 @@ import {
   Calendar,
   Camera,
   ClipboardCopy,
-  Database,
   ExternalLink,
   Globe,
   LayoutDashboard,
@@ -17,7 +16,6 @@ import {
   LogOut,
   Newspaper,
   Package,
-  RefreshCw,
   ShoppingCart,
   Trophy,
   Users,
@@ -27,7 +25,6 @@ import { AccountingView } from '@/src/components/AccountingView';
 import { AlbumView } from '@/src/components/AlbumView';
 import { ArchivesView } from '@/src/components/ArchivesView';
 import { AuthModal } from '@/src/components/AuthModal';
-import { BackupMigrationModal } from '@/src/components/BackupMigrationModal';
 import { CatalogView } from '@/src/components/CatalogView';
 import { DashboardHomeView } from '@/src/components/DashboardHomeView';
 import { DiscordGazetteModal } from '@/src/components/DiscordGazetteModal';
@@ -40,7 +37,6 @@ import {
 import { OrdersView } from '@/src/components/OrdersView';
 import { PlanningView } from '@/src/components/PlanningView';
 import { RankingView } from '@/src/components/RankingView';
-import { ResetModal } from '@/src/components/ResetModal';
 import { Toast, type ToastVariant } from '@/src/components/Toast';
 import { TreasuryView } from '@/src/components/TreasuryView';
 import { WeeklyHistoryPayrollView } from '@/src/components/WeeklyHistoryPayrollView';
@@ -67,15 +63,12 @@ import { auth, googleProvider } from '@/src/firebase';
 import {
   archiveWeekAndResetMissions,
   bootstrapAndJoinCartel,
-  type CartelBackupSnapshot,
   claimDailyDiscordDispatch,
   createDefaultCurrentPayroll,
   DEFAULT_ALBUM_STATE,
   DEFAULT_DISCORD_CONFIG,
   DEFAULT_HISTORY_STATE,
   deleteAlbumPhotoWithMedia,
-  exportCartelBackupSnapshot,
-  importCartelBackupSnapshot,
   isValidDiscordWebhookUrl,
   type LocalSeedData,
   lockEditorRole,
@@ -360,9 +353,7 @@ export default function App() {
 
   const [currentTab, setCurrentTab] = useState<TabKey>('home');
   const [authModalOpen, setAuthModalOpen] = useState(false);
-  const [resetModalOpen, setResetModalOpen] = useState(false);
   const [gazetteModalOpen, setGazetteModalOpen] = useState(false);
-  const [backupModalOpen, setBackupModalOpen] = useState(false);
   const [validatingMission, setValidatingMission] = useState<{
     mission: Mission;
     dayName: string;
@@ -2163,57 +2154,6 @@ export default function App() {
     );
   };
 
-  const handleConfirmResetWeek = (archiveBeforeReset: boolean) => {
-    if (readonly || !authUser) return;
-    const closingWeek = missionStates.__week || isoDate(currentWeekStart());
-    const newWeek = isoDate(currentWeekStart());
-
-    const nextArchives = { ...historyState.archives };
-    if (archiveBeforeReset) {
-      const archiveId = buildUniqueArchiveId(closingWeek, nextArchives);
-      const actorName =
-        authUser.displayName || authUser.email?.split('@')[0] || 'Éditeur';
-      nextArchives[archiveId] = buildArchiveRecordFromWeek({
-        archiveId,
-        archivedBy: actorName,
-        missionStates,
-        scheduleMeta,
-        weaponsLossAmount,
-        members: hierMembers,
-        inventoryPrices,
-        catalogGroups,
-        currentPayroll: historyState.currentPayroll,
-        treasuryMoney,
-        rewardStocks,
-        inventoryStock,
-        weaponsStock,
-        memberRankings,
-      });
-    }
-
-    const nextHistoryState: HistoryState = {
-      archives: nextArchives,
-      currentPayroll: createDefaultCurrentPayroll(newWeek),
-    };
-
-    autoRecalcAttemptedDateRef.current = '';
-    setMissionStates({ __week: newWeek });
-    setScheduleMeta(EMPTY_SCHEDULE_META);
-    setWeaponsLossAmount(0);
-    setHistoryState(nextHistoryState);
-    setResetModalOpen(false);
-    void archiveWeekAndResetMissions(authUser.uid, {
-      historyState: nextHistoryState,
-      nextWeek: newWeek,
-      weaponsLossAmount: 0,
-    }).catch((err) => setSyncError(err instanceof Error ? err : new Error(String(err))));
-    showToast(
-      archiveBeforeReset
-        ? 'Semaine archivée dans l’historique et réinitialisée !'
-        : 'Semaine réinitialisée !'
-    );
-  };
-
   const handleUpdateStock = (key: string, delta: number, deductIllegal: boolean = true) => {
     if (readonly || !authUser) return;
     const prevQty = Math.max(0, Number(inventoryStock[key]) || 0);
@@ -3321,30 +3261,6 @@ export default function App() {
     setDiscordConfig(nextConfig);
   };
 
-  const handleExportCartelBackup = async (): Promise<CartelBackupSnapshot> => {
-    return exportCartelBackupSnapshot({
-      missionStates,
-      scheduleMeta,
-      inventoryStock,
-      inventoryPrices,
-      weaponsStock,
-      treasuryMoney,
-      rewardStocks,
-      weaponsLossAmount,
-      hierMembers,
-      memberRankings,
-      catalogGroups,
-      albumState,
-      historyState,
-    });
-  };
-
-  const handleImportCartelBackup = async (snapshot: CartelBackupSnapshot): Promise<void> => {
-    if (readonly || !authUser) return;
-    await importCartelBackupSnapshot(authUser.uid, snapshot);
-    showToast('Sauvegarde importée et synchronisée sur Firestore !');
-  };
-
   const handleUpdateCurrentPayroll = (nextPayroll: CurrentWeekPayrollState) => {
     if (readonly || !authUser) return;
     const nextHistory: HistoryState = {
@@ -4023,25 +3939,6 @@ export default function App() {
                 <Newspaper className="w-3.5 h-3.5 text-gold" />
                 Gazette Discord
               </button>
-              <button
-                type="button"
-                onClick={() => setBackupModalOpen(true)}
-                title="Exporter ou importer une sauvegarde JSON complète du cartel"
-                className="px-3 py-2 rounded-lg text-xs font-bold bg-charcoal hover:bg-slateDark text-zinc-200 hover:text-white border border-zinc-700 hover:border-gold/60 transition flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap shrink-0"
-              >
-                <Database className="w-3.5 h-3.5 text-gold" />
-                Sauvegarde
-              </button>
-              {isUnlocked && (
-                <button
-                  type="button"
-                  onClick={() => setResetModalOpen(true)}
-                  className="px-3 py-2 rounded-lg text-xs font-bold bg-crimson-dark/60 hover:bg-crimson text-red-100 border border-crimson-light/50 transition flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap shrink-0"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  Reset
-                </button>
-              )}
             </div>
           </div>
 
@@ -4434,25 +4331,6 @@ export default function App() {
         onVerifyCode={handleVerifySecretCode}
         onLock={handleLockEditMode}
         onUpdateSecretCode={handleUpdateSecretCode}
-      />
-
-      <ResetModal
-        open={resetModalOpen}
-        hasWeekActivity={
-          kpis.successCount + kpis.failCount > 0 ||
-          weaponsLossAmount > 0 ||
-          historyState.currentPayroll.settled
-        }
-        onClose={() => setResetModalOpen(false)}
-        onConfirm={handleConfirmResetWeek}
-      />
-
-      <BackupMigrationModal
-        open={backupModalOpen}
-        isUnlocked={isUnlocked}
-        onClose={() => setBackupModalOpen(false)}
-        onExportBackup={handleExportCartelBackup}
-        onImportBackup={handleImportCartelBackup}
       />
 
       <DiscordGazetteModal
