@@ -1,0 +1,402 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isVerified() && (
+        request.auth.token.email == 'voirin.s63@gmail.com' ||
+        request.auth.token.email == 's.voirin63@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isCartelMember(cartelId) {
+      return isVerified() &&
+        exists(/databases/$(database)/documents/cartels/$(cartelId)/members/$(request.auth.uid));
+    }
+
+    function isCartelEditor(cartelId) {
+      return isAdmin() || (
+        isCartelMember(cartelId) &&
+        get(/databases/$(database)/documents/cartels/$(cartelId)/members/$(request.auth.uid)).data.role == 'editor'
+      );
+    }
+
+    function isValidCartel(data) {
+      return data.keys().hasAll(['name', 'ownerUid', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['name', 'ownerUid', 'createdAt', 'updatedAt']) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 80 &&
+        isValidId(data.ownerUid) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAuthConfig(data) {
+      return data.keys().hasAll(['secretCode', 'updatedAt', 'updatedBy']) &&
+        data.keys().hasOnly(['secretCode', 'updatedAt', 'updatedBy']) &&
+        data.secretCode is string && data.secretCode.size() >= 4 && data.secretCode.size() <= 64 &&
+        data.updatedAt is timestamp &&
+        isValidId(data.updatedBy);
+    }
+
+    function isValidDiscordConfig(data) {
+      return data.keys().hasAll([
+          'webhookUrl',
+          'autoEnabled',
+          'sendHour',
+          'sendMinute',
+          'includePhoto',
+          'customMessage',
+          'lastSentDate',
+          'lastSentAt',
+          'lastSentBy',
+          'updatedAt',
+          'updatedBy'
+        ]) &&
+        data.keys().hasOnly([
+          'webhookUrl',
+          'autoEnabled',
+          'sendHour',
+          'sendMinute',
+          'includePhoto',
+          'customMessage',
+          'lastSentDate',
+          'lastSentAt',
+          'lastSentBy',
+          'updatedAt',
+          'updatedBy'
+        ]) &&
+        data.webhookUrl is string &&
+        data.webhookUrl.size() <= 300 &&
+        data.webhookUrl.matches('^$|^https://(discord|discordapp)\\.com/api/webhooks/[0-9]+/[A-Za-z0-9._\\-]+$') &&
+        data.autoEnabled is bool &&
+        data.sendHour is int && data.sendHour >= 0 && data.sendHour <= 23 &&
+        data.sendMinute is int && data.sendMinute >= 0 && data.sendMinute <= 59 &&
+        data.includePhoto is bool &&
+        data.customMessage is string && data.customMessage.size() <= 300 &&
+        data.lastSentDate is string && data.lastSentDate.size() <= 20 &&
+        data.lastSentDate.matches('^$|^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+        data.lastSentAt is string && data.lastSentAt.size() <= 40 &&
+        data.lastSentBy is string && data.lastSentBy.size() <= 80 &&
+        data.updatedAt is timestamp &&
+        isValidId(data.updatedBy);
+    }
+
+    function isValidMember(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'role', 'accessCode', 'joinedAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'displayName', 'role', 'accessCode', 'joinedAt', 'updatedAt']) &&
+        isValidId(data.uid) &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80 &&
+        data.role in ['viewer', 'editor'] &&
+        data.accessCode is string && data.accessCode.size() <= 64 &&
+        data.joinedAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function hasValidSecretCode(cartelId, code) {
+      return exists(/databases/$(database)/documents/cartels/$(cartelId)/private/auth) &&
+        code == get(/databases/$(database)/documents/cartels/$(cartelId)/private/auth).data.secretCode;
+    }
+
+    function isValidMissionsState(data) {
+      return data.keys().hasAll(['week', 'entries', 'updatedAt', 'updatedBy']) &&
+        data.keys().hasOnly([
+          'week',
+          'entries',
+          'scheduleOverrides',
+          'unplacedMissionIds',
+          'lastRecalcDate',
+          'lastRecalcAt',
+          'updatedAt',
+          'updatedBy'
+        ]) &&
+        data.week is string && data.week.size() >= 10 && data.week.size() <= 20 &&
+        data.week.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+        data.entries is map && data.entries.size() <= 120 &&
+        (!('scheduleOverrides' in data) || (data.scheduleOverrides is map && data.scheduleOverrides.size() <= 120)) &&
+        (!('unplacedMissionIds' in data) || (
+          data.unplacedMissionIds is list &&
+          data.unplacedMissionIds.size() <= 120 &&
+          (data.unplacedMissionIds.size() == 0 || (data.unplacedMissionIds[0] is string && data.unplacedMissionIds[0].size() <= 64))
+        )) &&
+        (!('lastRecalcDate' in data) || (
+          data.lastRecalcDate is string &&
+          data.lastRecalcDate.size() <= 20 &&
+          data.lastRecalcDate.matches('^$|^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        )) &&
+        (!('lastRecalcAt' in data) || (data.lastRecalcAt is string && data.lastRecalcAt.size() <= 40)) &&
+        data.updatedAt is timestamp &&
+        isValidId(data.updatedBy);
+    }
+
+    function isValidInventoryState(data) {
+      return data.keys().hasAll(['stock', 'updatedAt', 'updatedBy']) &&
+        data.keys().hasOnly(['stock', 'prices', 'weapons', 'updatedAt', 'updatedBy']) &&
+        data.stock is map && data.stock.size() <= 100 &&
+        (!('prices' in data) || (data.prices is map && data.prices.size() <= 100)) &&
+        (!('weapons' in data) || (data.weapons is map && data.weapons.size() <= 150)) &&
+        data.updatedAt is timestamp &&
+        isValidId(data.updatedBy);
+    }
+
+    function isValidTreasuryState(data) {
+      return data.keys().hasAll(['legal', 'illegal', 'rewards', 'weaponsLossAmount', 'updatedAt', 'updatedBy']) &&
+        data.keys().hasOnly(['legal', 'illegal', 'rewards', 'weaponsLossAmount', 'updatedAt', 'updatedBy']) &&
+        data.legal is number && data.legal >= 0 &&
+        data.illegal is number && data.illegal >= 0 &&
+        data.rewards is map && data.rewards.size() <= 40 &&
+        data.weaponsLossAmount is number && data.weaponsLossAmount >= 0 &&
+        data.updatedAt is timestamp &&
+        isValidId(data.updatedBy);
+    }
+
+    function isValidHierarchyState(data) {
+      return data.keys().hasAll(['members', 'updatedAt', 'updatedBy']) &&
+        data.keys().hasOnly(['members', 'rankings', 'updatedAt', 'updatedBy']) &&
+        data.members is map && data.members.size() <= 100 &&
+        (!('rankings' in data) || (data.rankings is map && data.rankings.size() <= 100)) &&
+        data.updatedAt is timestamp &&
+        isValidId(data.updatedBy);
+    }
+
+    function isValidCatalogState(data) {
+      return data.keys().hasAll(['groups', 'updatedAt', 'updatedBy']) &&
+        data.keys().hasOnly(['groups', 'updatedAt', 'updatedBy']) &&
+        data.groups is map && data.groups.size() <= 40 &&
+        data.updatedAt is timestamp &&
+        isValidId(data.updatedBy);
+    }
+
+    function isValidAlbumState(data) {
+      return data.keys().hasAll(['photos', 'favorites', 'updatedAt', 'updatedBy']) &&
+        data.keys().hasOnly(['photos', 'favorites', 'updatedAt', 'updatedBy']) &&
+        data.photos is map && data.photos.size() <= 100 &&
+        data.favorites is list && data.favorites.size() <= 150 &&
+        (data.favorites.size() == 0 || (data.favorites[0] is string && data.favorites[0].size() <= 64)) &&
+        data.updatedAt is timestamp &&
+        isValidId(data.updatedBy);
+    }
+
+    function isValidAlbumMedia(data) {
+      return data.keys().hasAll(['id', 'imageUrl', 'mimeType', 'createdBy', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'imageUrl', 'mimeType', 'createdBy', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.imageUrl is string && data.imageUrl.size() >= 1 && data.imageUrl.size() <= 700000 &&
+        data.mimeType is string && data.mimeType.size() >= 1 && data.mimeType.size() <= 40 &&
+        isValidId(data.createdBy) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidHistoryState(data) {
+      return data.keys().hasAll(['archives', 'currentPayroll', 'updatedAt', 'updatedBy']) &&
+        data.keys().hasOnly(['archives', 'currentPayroll', 'updatedAt', 'updatedBy']) &&
+        data.archives is map && data.archives.size() <= 60 &&
+        data.currentPayroll is map && data.currentPayroll.size() <= 20 &&
+        data.updatedAt is timestamp &&
+        isValidId(data.updatedBy);
+    }
+
+    function isValidStateDoc(stateId, data) {
+      return (stateId == 'missions' && isValidMissionsState(data)) ||
+        (stateId == 'inventory' && isValidInventoryState(data)) ||
+        (stateId == 'treasury' && isValidTreasuryState(data)) ||
+        (stateId == 'hierarchy' && isValidHierarchyState(data)) ||
+        (stateId == 'catalog' && isValidCatalogState(data)) ||
+        (stateId == 'album' && isValidAlbumState(data)) ||
+        (stateId == 'history' && isValidHistoryState(data));
+    }
+
+    function isValidStateUpdate(stateId, next, prev) {
+      return (stateId == 'missions' && next.diff(prev).affectedKeys().hasOnly([
+          'week',
+          'entries',
+          'scheduleOverrides',
+          'unplacedMissionIds',
+          'lastRecalcDate',
+          'lastRecalcAt',
+          'updatedAt',
+          'updatedBy'
+        ])) ||
+        (stateId == 'inventory' && next.diff(prev).affectedKeys().hasOnly(['stock', 'prices', 'weapons', 'updatedAt', 'updatedBy'])) ||
+        (stateId == 'treasury' && next.diff(prev).affectedKeys().hasOnly(['legal', 'illegal', 'rewards', 'weaponsLossAmount', 'updatedAt', 'updatedBy'])) ||
+        (stateId == 'hierarchy' && next.diff(prev).affectedKeys().hasOnly(['members', 'rankings', 'updatedAt', 'updatedBy'])) ||
+        (stateId == 'catalog' && next.diff(prev).affectedKeys().hasOnly(['groups', 'updatedAt', 'updatedBy'])) ||
+        (stateId == 'album' && next.diff(prev).affectedKeys().hasOnly(['photos', 'favorites', 'updatedAt', 'updatedBy'])) ||
+        (stateId == 'history' && next.diff(prev).affectedKeys().hasOnly(['archives', 'currentPayroll', 'updatedAt', 'updatedBy']));
+    }
+
+    match /admins/{uid} {
+      allow get: if isValidId(uid) && isSignedIn() && (request.auth.uid == uid || isAdmin());
+      allow list, create, update, delete: if false;
+    }
+
+    match /cartels/{cartelId} {
+      allow get: if isValidId(cartelId) && (isAdmin() || isCartelMember(cartelId));
+      allow list: if false;
+      allow create: if isValidId(cartelId) &&
+        isAdmin() &&
+        isValidCartel(incoming()) &&
+        incoming().ownerUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(cartelId) &&
+        isAdmin() &&
+        isValidCartel(incoming()) &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['name', 'updatedAt']);
+      allow delete: if false;
+
+      match /private/{configId} {
+        allow get: if isValidId(cartelId) &&
+          isValidId(configId) &&
+          configId in ['auth', 'discord'] &&
+          isCartelEditor(cartelId);
+        allow list: if false;
+        allow create: if isValidId(cartelId) &&
+          isValidId(configId) &&
+          exists(/databases/$(database)/documents/cartels/$(cartelId)) &&
+          incoming().updatedBy == request.auth.uid &&
+          incoming().updatedAt == request.time &&
+          (
+            (configId == 'auth' && isAdmin() && isValidAuthConfig(incoming())) ||
+            (configId == 'discord' && isCartelEditor(cartelId) && isValidDiscordConfig(incoming()))
+          );
+        allow update: if isValidId(cartelId) &&
+          isValidId(configId) &&
+          isCartelEditor(cartelId) &&
+          incoming().updatedBy == request.auth.uid &&
+          incoming().updatedAt == request.time &&
+          (
+            (
+              configId == 'auth' &&
+              isValidAuthConfig(incoming()) &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['secretCode', 'updatedAt', 'updatedBy'])
+            ) ||
+            (
+              configId == 'discord' &&
+              isValidDiscordConfig(incoming()) &&
+              incoming().diff(existing()).affectedKeys().hasOnly([
+                'webhookUrl',
+                'autoEnabled',
+                'sendHour',
+                'sendMinute',
+                'includePhoto',
+                'customMessage',
+                'lastSentDate',
+                'lastSentAt',
+                'lastSentBy',
+                'updatedAt',
+                'updatedBy'
+              ])
+            )
+          );
+        allow delete: if false;
+      }
+
+      match /members/{memberId} {
+        allow get: if isValidId(cartelId) && isValidId(memberId) && isVerified() && (request.auth.uid == memberId || isAdmin());
+        allow list: if false;
+        allow create: if isValidId(cartelId) &&
+          isValidId(memberId) &&
+          isVerified() &&
+          request.auth.uid == memberId &&
+          isValidMember(incoming()) &&
+          incoming().uid == request.auth.uid &&
+          incoming().joinedAt == request.time &&
+          incoming().updatedAt == request.time &&
+          exists(/databases/$(database)/documents/cartels/$(cartelId)) &&
+          (
+            incoming().role == 'viewer' ||
+            (incoming().role == 'editor' && (isAdmin() || hasValidSecretCode(cartelId, incoming().accessCode)))
+          );
+        allow update: if isValidId(cartelId) &&
+          isValidId(memberId) &&
+          isVerified() &&
+          request.auth.uid == memberId &&
+          isValidMember(incoming()) &&
+          incoming().uid == existing().uid &&
+          incoming().joinedAt == existing().joinedAt &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'role', 'accessCode', 'updatedAt']) &&
+          (
+            incoming().role == 'viewer' ||
+            (incoming().role == 'editor' && (isAdmin() || hasValidSecretCode(cartelId, incoming().accessCode)))
+          );
+        allow delete: if false;
+      }
+
+      match /state/{stateId} {
+        allow get: if isValidId(cartelId) &&
+          isValidId(stateId) &&
+          stateId in ['missions', 'inventory', 'treasury', 'hierarchy', 'catalog', 'album', 'history'] &&
+          (isAdmin() || isCartelMember(cartelId));
+        allow list: if false;
+        allow create: if isValidId(cartelId) &&
+          isValidId(stateId) &&
+          stateId in ['missions', 'inventory', 'treasury', 'hierarchy', 'catalog', 'album', 'history'] &&
+          isCartelEditor(cartelId) &&
+          isValidStateDoc(stateId, incoming()) &&
+          incoming().updatedBy == request.auth.uid &&
+          incoming().updatedAt == request.time &&
+          exists(/databases/$(database)/documents/cartels/$(cartelId));
+        allow update: if isValidId(cartelId) &&
+          isValidId(stateId) &&
+          stateId in ['missions', 'inventory', 'treasury', 'hierarchy', 'catalog', 'album', 'history'] &&
+          isCartelEditor(cartelId) &&
+          isValidStateDoc(stateId, incoming()) &&
+          incoming().updatedBy == request.auth.uid &&
+          incoming().updatedAt == request.time &&
+          isValidStateUpdate(stateId, incoming(), existing());
+        allow delete: if false;
+      }
+
+      match /albumMedia/{photoId} {
+        allow get: if isValidId(cartelId) &&
+          isValidId(photoId) &&
+          (isAdmin() || isCartelMember(cartelId));
+        allow list: if false;
+        allow create: if isValidId(cartelId) &&
+          isValidId(photoId) &&
+          isCartelEditor(cartelId) &&
+          isValidAlbumMedia(incoming()) &&
+          incoming().id == photoId &&
+          incoming().createdBy == request.auth.uid &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          exists(/databases/$(database)/documents/cartels/$(cartelId));
+        allow update: if false;
+        allow delete: if isValidId(cartelId) &&
+          isValidId(photoId) &&
+          isCartelEditor(cartelId);
+      }
+    }
+  }
+}

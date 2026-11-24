@@ -1,0 +1,85 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-obsidian: #080808;
+  --color-charcoal: #11100f;
+  --color-slateDark: #181614;
+  --color-gunmetal: #343333;
+  --color-bronze: #6b5140;
+  --color-gold: #c5a15a;
+  --color-gold-light: #e3c98f;
+  --color-crimson: #8e2024;
+  --color-crimson-dark: #5c1316;
+  --color-crimson-light: #c83e43;
+
+  --font-sans: "Montserrat", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Playfair Display", ui-serif, Georgia, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+body {
+  position: relative;
+  isolation: isolate;
+  min-height: 100vh;
+  background-color: #080808;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(8, 8, 8, 0.84), rgba(8, 8, 8, 0.94)),
+    url("/assets/emblem.webp");
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: url("/assets/emblem.webp");
+  background-position: center;
+  background-size: min(76vw, 620px);
+  background-repeat: no-repeat;
+  opacity: 0.12;
+  filter: sepia(18%) contrast(120%);
+}
+
+.gold-border {
+  border: 1px solid rgba(197, 161, 90, 0.34);
+  box-shadow: 0 6px 24px -4px rgba(0, 0, 0, 0.82);
+}
+
+.bronze-border {
+  border: 1px solid rgba(107, 81, 64, 0.55);
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #080808;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #343333;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #c5a15a;
+}

@@ -1,0 +1,8 @@
+{
+  "name": "Remix LOS CERBEROS — Gestion Cartel",
+  "description": "Semainier d\u0027opérations, inventaire matériel, trésorerie, comptabilité et hiérarchie pour le cartel Los Cerberos.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
