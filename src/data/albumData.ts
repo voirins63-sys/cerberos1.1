@@ -24,7 +24,7 @@ export const BUILT_IN_ALBUM_PHOTOS: BuiltInAlbumPhoto[] = [
     dateLabel: 'Archives Cartel',
     authorName: 'Commandement',
     createdAtIso: '2026-11-20T22:00:00.000Z',
-    src: '/assets/aistudio/image_d68a7777.png',
+    src: '/assets/media/image_d68a7777.webp',
     builtIn: true,
   },
   {
@@ -37,7 +37,7 @@ export const BUILT_IN_ALBUM_PHOTOS: BuiltInAlbumPhoto[] = [
     dateLabel: 'Archives Cartel',
     authorName: 'Commandement',
     createdAtIso: '2026-11-20T21:55:00.000Z',
-    src: '/assets/aistudio/image_bba68987.png',
+    src: '/assets/media/image_bba68987.webp',
     builtIn: true,
   },
   {
@@ -50,7 +50,7 @@ export const BUILT_IN_ALBUM_PHOTOS: BuiltInAlbumPhoto[] = [
     dateLabel: 'Soirée Opérations',
     authorName: 'Los Cerberos',
     createdAtIso: '2026-11-20T21:40:00.000Z',
-    src: '/assets/aistudio/image_df344d8d.png',
+    src: '/assets/media/image_df344d8d.webp',
     builtIn: true,
   },
   {
@@ -63,7 +63,7 @@ export const BUILT_IN_ALBUM_PHOTOS: BuiltInAlbumPhoto[] = [
     dateLabel: 'Gros Coup',
     authorName: 'Escouade Assaut',
     createdAtIso: '2026-11-20T21:30:00.000Z',
-    src: '/assets/aistudio/image_97df8fb8.png',
+    src: '/assets/media/image_97df8fb8.webp',
     builtIn: true,
   },
   {
@@ -76,7 +76,7 @@ export const BUILT_IN_ALBUM_PHOTOS: BuiltInAlbumPhoto[] = [
     dateLabel: 'Gros Coup',
     authorName: 'Escouade Assaut',
     createdAtIso: '2026-11-20T21:25:00.000Z',
-    src: '/assets/aistudio/image_b466728e.png',
+    src: '/assets/media/image_b466728e.webp',
     builtIn: true,
   },
   {
@@ -89,7 +89,7 @@ export const BUILT_IN_ALBUM_PHOTOS: BuiltInAlbumPhoto[] = [
     dateLabel: 'Gros Coup',
     authorName: 'Escouade Assaut',
     createdAtIso: '2026-11-20T21:20:00.000Z',
-    src: '/assets/aistudio/image_bd3c4ab4.png',
+    src: '/assets/media/image_bd3c4ab4.webp',
     builtIn: true,
   },
   {
@@ -102,7 +102,7 @@ export const BUILT_IN_ALBUM_PHOTOS: BuiltInAlbumPhoto[] = [
     dateLabel: 'Opération Spéciale',
     authorName: 'Escouade Terrain',
     createdAtIso: '2026-11-20T21:10:00.000Z',
-    src: '/assets/aistudio/image_d9e18224.png',
+    src: '/assets/media/image_d9e18224.webp',
     builtIn: true,
   },
   {
@@ -115,7 +115,7 @@ export const BUILT_IN_ALBUM_PHOTOS: BuiltInAlbumPhoto[] = [
     dateLabel: 'Confrontation',
     authorName: 'Escouade Terrain',
     createdAtIso: '2026-11-20T21:00:00.000Z',
-    src: '/assets/aistudio/image_a08daa0b.png',
+    src: '/assets/media/image_a08daa0b.webp',
     builtIn: true,
   },
   {
@@ -128,7 +128,7 @@ export const BUILT_IN_ALBUM_PHOTOS: BuiltInAlbumPhoto[] = [
     dateLabel: 'Confrontation',
     authorName: 'Escouade Terrain',
     createdAtIso: '2026-11-20T20:50:00.000Z',
-    src: '/assets/aistudio/image_e4b58fd2.png',
+    src: '/assets/media/image_e4b58fd2.webp',
     builtIn: true,
   },
   {
@@ -141,7 +141,7 @@ export const BUILT_IN_ALBUM_PHOTOS: BuiltInAlbumPhoto[] = [
     dateLabel: 'Fin de Journée',
     authorName: 'Escouade Terrain',
     createdAtIso: '2026-11-20T20:40:00.000Z',
-    src: '/assets/aistudio/image_efdad715.png',
+    src: '/assets/media/image_efdad715.webp',
     builtIn: true,
   },
   {
@@ -154,7 +154,7 @@ export const BUILT_IN_ALBUM_PHOTOS: BuiltInAlbumPhoto[] = [
     dateLabel: 'Intervention Jour',
     authorName: 'Escouade Terrain',
     createdAtIso: '2026-11-20T20:30:00.000Z',
-    src: '/assets/aistudio/image_146297f5.png',
+    src: '/assets/media/image_146297f5.webp',
     builtIn: true,
   },
   {
@@ -167,7 +167,7 @@ export const BUILT_IN_ALBUM_PHOTOS: BuiltInAlbumPhoto[] = [
     dateLabel: 'Reconnaissance',
     authorName: 'Los Cerberos',
     createdAtIso: '2026-11-20T20:20:00.000Z',
-    src: '/assets/aistudio/image_57321496.png',
+    src: '/assets/media/image_57321496.webp',
     builtIn: true,
   },
 ];

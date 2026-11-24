@@ -64,35 +64,35 @@ const GROUP_FLYERS: Record<
 > = {
   marabunta: [
     {
-      src: '/assets/aistudio/image_83d981ed.png',
+      src: '/assets/media/image_83d981ed.webp',
       title: 'Marabunta Grande — Réparation & Gilets',
     },
     {
-      src: '/assets/aistudio/image_a6b3bf7e.png',
+      src: '/assets/media/image_a6b3bf7e.webp',
       title: 'Marabunta Supply Co. — Munitions & Accessoires',
     },
   ],
   brad: [
     {
-      src: '/assets/aistudio/Capture_d__cran_2026-11-19_201726_39da0692.png',
+      src: '/assets/media/Capture_d__cran_2026-11-19_201726_39da0692.webp',
       title: 'Brad — Marché Noir (Tarifs de rachat)',
     },
   ],
   eminence: [
     {
-      src: '/assets/aistudio/image_8fe1a6c8.png',
+      src: '/assets/media/image_8fe1a6c8.webp',
       title: 'Éminences — Clés & Accès',
     },
     {
-      src: '/assets/aistudio/image_2c321c23.png',
+      src: '/assets/media/image_2c321c23.webp',
       title: 'Éminences — Items utilitaires',
     },
     {
-      src: '/assets/aistudio/image_a57bad7d.png',
+      src: '/assets/media/image_a57bad7d.webp',
       title: 'Éminences — Packs de Braquage',
     },
     {
-      src: '/assets/aistudio/image_e6c8f047.png',
+      src: '/assets/media/image_e6c8f047.webp',
       title: 'Éminence — Whiskey de Luxe (15 $)',
     },
   ],

@@ -872,7 +872,7 @@ export async function renderGazetteCanvasDataUrl(
 
   // Preload assets (with local fallback if external URL fails CORS)
   const [emblemImg, rawPhotoImg] = await Promise.all([
-    loadImageForCanvas('/assets/aistudio/image_bba68987.png').then(
+    loadImageForCanvas('/assets/media/image_bba68987.webp').then(
       (img) => img || loadImageForCanvas('/assets/emblem.webp')
     ),
     includePhoto ? loadImageForCanvas(data.photo.src) : Promise.resolve(null),

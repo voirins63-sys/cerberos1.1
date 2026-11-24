@@ -109,6 +109,7 @@ interface DashboardPhotoProps {
   alt: string;
   fallbackTitle: string;
   className?: string;
+  priority?: boolean;
 }
 
 const DashboardPhoto: React.FC<DashboardPhotoProps> = ({
@@ -116,6 +117,7 @@ const DashboardPhoto: React.FC<DashboardPhotoProps> = ({
   alt,
   fallbackTitle,
   className = '',
+  priority = false,
 }) => {
   const [hasError, setHasError] = useState(false);
 
@@ -134,6 +136,8 @@ const DashboardPhoto: React.FC<DashboardPhotoProps> = ({
     <img
       src={src}
       alt={alt}
+      loading={priority ? 'eager' : 'lazy'}
+      decoding="async"
       referrerPolicy="no-referrer"
       onError={() => setHasError(true)}
       className={`w-full h-full object-cover ${className}`}
@@ -332,6 +336,7 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
               src={hqHeroImg}
               alt="Salle de commandement Los Cerberos"
               fallbackTitle="Quartier Général · Los Cerberos"
+              priority
               className="group-hover:scale-[1.02] transition-transform duration-700"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-obsidian via-obsidian/80 to-obsidian/30" />
@@ -361,7 +366,7 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
 
               {/* Métriques clés intégrées sur fond lisible */}
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-1">
-                <div className="rounded-xl bg-obsidian/80 backdrop-blur-sm border border-bronze/50 px-3.5 py-2.5">
+                <div className="rounded-xl bg-obsidian/90 lg:bg-obsidian/80 lg:backdrop-blur-sm border border-bronze/50 px-3.5 py-2.5">
                   <div className="text-[10px] uppercase tracking-wider text-zinc-400">
                     Patrimoine Global
                   </div>
@@ -369,7 +374,7 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
                     {formatMoney(computedWealth)}
                   </div>
                 </div>
-                <div className="rounded-xl bg-obsidian/80 backdrop-blur-sm border border-bronze/50 px-3.5 py-2.5">
+                <div className="rounded-xl bg-obsidian/90 lg:bg-obsidian/80 lg:backdrop-blur-sm border border-bronze/50 px-3.5 py-2.5">
                   <div className="text-[10px] uppercase tracking-wider text-zinc-400">
                     Missions Prêtes
                   </div>
@@ -377,7 +382,7 @@ export const DashboardHomeView: React.FC<DashboardHomeViewProps> = ({
                     {missionReadiness.readyCount} / {missionReadiness.total}
                   </div>
                 </div>
-                <div className="col-span-2 sm:col-span-1 rounded-xl bg-obsidian/80 backdrop-blur-sm border border-bronze/50 px-3.5 py-2.5">
+                <div className="col-span-2 sm:col-span-1 rounded-xl bg-obsidian/90 lg:bg-obsidian/80 lg:backdrop-blur-sm border border-bronze/50 px-3.5 py-2.5">
                   <div className="text-[10px] uppercase tracking-wider text-zinc-400">
                     Bénéfice Net
                   </div>

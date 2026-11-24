@@ -148,6 +148,8 @@ const AlbumImageFrame: React.FC<AlbumImageFrameProps> = ({
     <img
       src={src}
       alt={alt}
+      loading="lazy"
+      decoding="async"
       referrerPolicy="no-referrer"
       onError={() => setErroredSrc(src)}
       className={`w-full h-full object-cover ${className}`}

@@ -45,37 +45,39 @@ body {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -2;
-  pointer-events: none;
-  background-image:
-    linear-gradient(rgba(8, 8, 8, 0.84), rgba(8, 8, 8, 0.94)),
-    url("/assets/emblem.webp");
-  background-position: center;
-  background-size: cover;
-  background-repeat: no-repeat;
-}
+@media (min-width: 768px) {
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -2;
+    pointer-events: none;
+    background-image:
+      linear-gradient(rgba(8, 8, 8, 0.84), rgba(8, 8, 8, 0.94)),
+      url("/assets/emblem.webp");
+    background-position: center;
+    background-size: cover;
+    background-repeat: no-repeat;
+  }
 
-body::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background-image: url("/assets/emblem.webp");
-  background-position: center;
-  background-size: min(76vw, 620px);
-  background-repeat: no-repeat;
-  opacity: 0.12;
-  filter: sepia(18%) contrast(120%);
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image: url("/assets/emblem.webp");
+    background-position: center;
+    background-size: min(76vw, 620px);
+    background-repeat: no-repeat;
+    opacity: 0.12;
+    filter: sepia(18%) contrast(120%);
+  }
 }
 
 .gold-border {
   border: 1px solid rgba(197, 161, 90, 0.34);
-  box-shadow: 0 6px 24px -4px rgba(0, 0, 0, 0.82);
+  box-shadow: 0 4px 16px -4px rgba(0, 0, 0, 0.72);
 }
 
 .bronze-border {

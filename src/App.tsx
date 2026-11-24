@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { onAuthStateChanged, signInWithPopup, signOut, type User } from 'firebase/auth';
 import {
   Archive,
@@ -25,27 +25,60 @@ import {
   Wallet,
   X,
 } from 'lucide-react';
-import { AccountingView } from '@/src/components/AccountingView';
-import { AlbumView } from '@/src/components/AlbumView';
-import { ArchivesView } from '@/src/components/ArchivesView';
 import { AuthModal } from '@/src/components/AuthModal';
-import { CatalogView } from '@/src/components/CatalogView';
 import { DashboardHomeView } from '@/src/components/DashboardHomeView';
-import { DiscordGazetteModal } from '@/src/components/DiscordGazetteModal';
-import { GarageView } from '@/src/components/GarageView';
-import { HierarchyView } from '@/src/components/HierarchyView';
-import { InventoryView } from '@/src/components/InventoryView';
-import {
-  MissionValidationModal,
-  type MissionValidationPayload,
-} from '@/src/components/MissionValidationModal';
+import type { MissionValidationPayload } from '@/src/components/MissionValidationModal';
 import { OfflineIndicator } from '@/src/components/OfflineIndicator';
-import { OrdersView } from '@/src/components/OrdersView';
-import { PlanningView } from '@/src/components/PlanningView';
-import { RankingView } from '@/src/components/RankingView';
 import { Toast, type ToastVariant } from '@/src/components/Toast';
-import { TreasuryView } from '@/src/components/TreasuryView';
-import { WeeklyHistoryPayrollView } from '@/src/components/WeeklyHistoryPayrollView';
+
+const AccountingView = lazy(() =>
+  import('@/src/components/AccountingView').then((m) => ({ default: m.AccountingView }))
+);
+const AlbumView = lazy(() =>
+  import('@/src/components/AlbumView').then((m) => ({ default: m.AlbumView }))
+);
+const ArchivesView = lazy(() =>
+  import('@/src/components/ArchivesView').then((m) => ({ default: m.ArchivesView }))
+);
+const CatalogView = lazy(() =>
+  import('@/src/components/CatalogView').then((m) => ({ default: m.CatalogView }))
+);
+const DiscordGazetteModal = lazy(() =>
+  import('@/src/components/DiscordGazetteModal').then((m) => ({
+    default: m.DiscordGazetteModal,
+  }))
+);
+const GarageView = lazy(() =>
+  import('@/src/components/GarageView').then((m) => ({ default: m.GarageView }))
+);
+const HierarchyView = lazy(() =>
+  import('@/src/components/HierarchyView').then((m) => ({ default: m.HierarchyView }))
+);
+const InventoryView = lazy(() =>
+  import('@/src/components/InventoryView').then((m) => ({ default: m.InventoryView }))
+);
+const MissionValidationModal = lazy(() =>
+  import('@/src/components/MissionValidationModal').then((m) => ({
+    default: m.MissionValidationModal,
+  }))
+);
+const OrdersView = lazy(() =>
+  import('@/src/components/OrdersView').then((m) => ({ default: m.OrdersView }))
+);
+const PlanningView = lazy(() =>
+  import('@/src/components/PlanningView').then((m) => ({ default: m.PlanningView }))
+);
+const RankingView = lazy(() =>
+  import('@/src/components/RankingView').then((m) => ({ default: m.RankingView }))
+);
+const TreasuryView = lazy(() =>
+  import('@/src/components/TreasuryView').then((m) => ({ default: m.TreasuryView }))
+);
+const WeeklyHistoryPayrollView = lazy(() =>
+  import('@/src/components/WeeklyHistoryPayrollView').then((m) => ({
+    default: m.WeeklyHistoryPayrollView,
+  }))
+);
 import {
   DEFAULT_CATALOG_GROUPS,
   DEFAULT_SECRET_CODE,
@@ -174,12 +207,6 @@ import {
   isPastDailyRecalcTime,
 } from '@/src/utils/schedule';
 import { simulateMissionSupplyPlan } from '@/src/utils/missionSupply';
-import {
-  buildDailyGazetteData,
-  renderGazetteCanvasDataUrl,
-  sendGazetteToDiscord,
-  sendInstantDiscordAlert,
-} from '@/src/utils/discordGazette';
 
 const LEGACY_STORAGE_KEYS = {
   missions: 'los_cerberos_local_state',
@@ -723,6 +750,8 @@ export default function App() {
           lastSentBy: claim.previousLastSentBy,
         };
 
+        const { buildDailyGazetteData, renderGazetteCanvasDataUrl, sendGazetteToDiscord } =
+          await import('@/src/utils/discordGazette');
         const gazetteData = await buildDailyGazetteData({
           missionStates,
           scheduleMeta,
@@ -1871,8 +1900,9 @@ export default function App() {
 
         void authUser
           .getIdToken()
-          .then((idToken) =>
-            sendInstantDiscordAlert({
+          .then(async (idToken) => {
+            const { sendInstantDiscordAlert } = await import('@/src/utils/discordGazette');
+            return sendInstantDiscordAlert({
               idToken,
               webhookUrl: discordConfig.webhookUrl,
               severity: isMajorFail || hasWeaponLoss ? 'critical' : 'warning',
@@ -1880,8 +1910,8 @@ export default function App() {
               description: alertReasons.join('\n'),
               fields: alertFields,
               footer: `Los Cerberos · Validé par ${authUser.displayName || authUser.email?.split('@')[0] || 'Éditeur'}`,
-            })
-          )
+            });
+          })
           .catch(() => {
             // Non-blocking alert: ignore network failure so mission save is never disrupted
           });
@@ -3392,7 +3422,10 @@ export default function App() {
     fields: Array<{ name: string; value: string; inline?: boolean }>;
   }) => {
     if (readonly || !authUser) return;
-    const idToken = await authUser.getIdToken();
+    const [idToken, { sendInstantDiscordAlert }] = await Promise.all([
+      authUser.getIdToken(),
+      import('@/src/utils/discordGazette'),
+    ]);
     await sendInstantDiscordAlert({
       idToken,
       webhookUrl: discordConfig.webhookUrl,
@@ -3928,7 +3961,7 @@ export default function App() {
   return (
     <div className="min-h-screen pb-24 lg:pb-16">
       {/* EN-TÊTE COMPACT & RESPONSIVE */}
-      <header className="sticky top-0 z-40 bg-obsidian/95 backdrop-blur-md border-b border-crimson/70 shadow-2xl">
+      <header className="sticky top-0 z-40 bg-obsidian/98 lg:bg-obsidian/95 lg:backdrop-blur-md border-b border-crimson/70 shadow-xl">
         <div className="hidden sm:block border-b border-bronze/35 bg-charcoal/80">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-1.5 flex items-center justify-between gap-3 text-[10px] tracking-[0.26em] uppercase">
             <span className="text-gold-light/90 font-semibold truncate">
@@ -4219,6 +4252,14 @@ export default function App() {
           />
         )}
 
+        <Suspense
+          fallback={
+            <div className="py-16 flex flex-col items-center justify-center gap-2 text-zinc-400">
+              <div className="w-7 h-7 rounded-full border-2 border-gold border-t-transparent animate-spin" />
+              <span className="text-xs font-mono">Chargement...</span>
+            </div>
+          }
+        >
         {currentTab === 'planning' && (
           <PlanningView
             missionStates={missionStates}
@@ -4451,6 +4492,7 @@ export default function App() {
             onShowToast={showToast}
           />
         )}
+        </Suspense>
       </main>
 
       <footer className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 pb-8 border-t border-bronze/30 flex flex-col sm:flex-row items-center justify-between gap-2 text-[10px] tracking-[0.24em] uppercase text-zinc-500 text-center sm:text-left">
@@ -4463,7 +4505,7 @@ export default function App() {
       {/* BARRE DE NAVIGATION MOBILE FIXE EN BAS */}
       <nav
         aria-label="Navigation mobile"
-        className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-obsidian/95 backdrop-blur-lg border-t border-gold/30 pb-safe shadow-[0_-8px_24px_rgba(0,0,0,0.75)]"
+        className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-obsidian/98 border-t border-gold/30 pb-safe shadow-[0_-6px_18px_rgba(0,0,0,0.75)]"
       >
         <div className="grid grid-cols-5 items-stretch">
           {(
@@ -4515,7 +4557,7 @@ export default function App() {
       {/* MENU TIROIR MOBILE COMPLET */}
       {mobileMenuOpen && (
         <div
-          className="lg:hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end"
+          className="lg:hidden fixed inset-0 z-50 bg-black/85 flex items-end"
           onClick={() => setMobileMenuOpen(false)}
         >
           <div
@@ -4634,56 +4676,64 @@ export default function App() {
         onUpdateSecretCode={handleUpdateSecretCode}
       />
 
-      <DiscordGazetteModal
-        open={gazetteModalOpen}
-        readonly={readonly}
-        senderName={authUser.displayName || authUser.email?.split('@')[0] || 'Éditeur'}
-        getIdToken={() => authUser.getIdToken()}
-        discordConfig={discordConfig}
-        hasEnvFallback={hasDiscordEnvFallback}
-        missionStates={missionStates}
-        scheduleMeta={scheduleMeta}
-        inventoryStock={inventoryStock}
-        inventoryPrices={inventoryPrices}
-        weaponsStock={weaponsStock}
-        rewardStocks={rewardStocks}
-        treasuryMoney={treasuryMoney}
-        weaponsLossAmount={weaponsLossAmount}
-        hierMembers={hierMembers}
-        memberRankings={memberRankings}
-        catalogGroups={catalogGroups}
-        albumState={albumState}
-        historyState={historyState}
-        onClose={() => setGazetteModalOpen(false)}
-        onSaveConfig={handleSaveDiscordConfig}
-        onRequestUnlock={() => {
-          setGazetteModalOpen(false);
-          setAuthModalOpen(true);
-        }}
-        onShowToast={(msg) => showToast(msg)}
-      />
+      {gazetteModalOpen && (
+        <Suspense fallback={null}>
+          <DiscordGazetteModal
+            open={gazetteModalOpen}
+            readonly={readonly}
+            senderName={authUser.displayName || authUser.email?.split('@')[0] || 'Éditeur'}
+            getIdToken={() => authUser.getIdToken()}
+            discordConfig={discordConfig}
+            hasEnvFallback={hasDiscordEnvFallback}
+            missionStates={missionStates}
+            scheduleMeta={scheduleMeta}
+            inventoryStock={inventoryStock}
+            inventoryPrices={inventoryPrices}
+            weaponsStock={weaponsStock}
+            rewardStocks={rewardStocks}
+            treasuryMoney={treasuryMoney}
+            weaponsLossAmount={weaponsLossAmount}
+            hierMembers={hierMembers}
+            memberRankings={memberRankings}
+            catalogGroups={catalogGroups}
+            albumState={albumState}
+            historyState={historyState}
+            onClose={() => setGazetteModalOpen(false)}
+            onSaveConfig={handleSaveDiscordConfig}
+            onRequestUnlock={() => {
+              setGazetteModalOpen(false);
+              setAuthModalOpen(true);
+            }}
+            onShowToast={(msg) => showToast(msg)}
+          />
+        </Suspense>
+      )}
 
-      <MissionValidationModal
-        open={Boolean(validatingMission)}
-        mission={validatingMission?.mission || null}
-        dayName={validatingMission?.dayName || ''}
-        initialStatus={validatingMission?.initialStatus}
-        entry={
-          validatingMission
-            ? getMissionEntry(missionStates, validatingMission.mission.id)
-            : {}
-        }
-        inventoryStock={inventoryStock}
-        inventoryPrices={inventoryPrices}
-        catalogGroups={catalogGroups}
-        weaponsStock={weaponsStock}
-        rewardStocks={rewardStocks}
-        treasuryMoney={treasuryMoney}
-        members={hierMembers}
-        onClose={() => setValidatingMission(null)}
-        onConfirm={handleConfirmMissionValidation}
-        onResetMission={handleResetMissionFromModal}
-      />
+      {Boolean(validatingMission) && (
+        <Suspense fallback={null}>
+          <MissionValidationModal
+            open={Boolean(validatingMission)}
+            mission={validatingMission?.mission || null}
+            dayName={validatingMission?.dayName || ''}
+            initialStatus={validatingMission?.initialStatus}
+            entry={
+              validatingMission
+                ? getMissionEntry(missionStates, validatingMission.mission.id)
+                : {}
+            }
+            inventoryStock={inventoryStock}
+            inventoryPrices={inventoryPrices}
+            catalogGroups={catalogGroups}
+            weaponsStock={weaponsStock}
+            rewardStocks={rewardStocks}
+            treasuryMoney={treasuryMoney}
+            members={hierMembers}
+            onClose={() => setValidatingMission(null)}
+            onConfirm={handleConfirmMissionValidation}
+            onResetMission={handleResetMissionFromModal}
+          />
+        </Suspense>
+      )}
 
       <OfflineIndicator />
 
