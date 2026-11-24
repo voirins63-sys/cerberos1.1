@@ -140,7 +140,7 @@ function sanitizeEmbed(raw: unknown): SanitizedEmbedPayload | null {
     .filter((f): f is Record<string, unknown> => Boolean(f) && typeof f === 'object')
     .map((f) => ({
       name: typeof f.name === 'string' ? f.name.trim().slice(0, 120) : '-',
-      value: typeof f.value === 'string' ? f.value.trim().slice(0, 500) : '-',
+      value: typeof f.value === 'string' ? f.value.trim().slice(0, 950) : '-',
       inline: Boolean(f.inline),
     }))
     .filter((f) => f.name.length > 0 && f.value.length > 0);
@@ -287,6 +287,101 @@ async function createApp(): Promise<express.Express> {
       } catch {
         res.status(500).json({
           error: 'Erreur serveur lors de la transmission vers Discord.',
+        });
+      }
+    }
+  );
+
+  app.post(
+    '/api/discord/send-alert',
+    requireVerifiedFirebaseUser,
+    async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const body = (req.body || {}) as Record<string, unknown>;
+        const requestedWebhook =
+          typeof body.webhookUrl === 'string' ? body.webhookUrl : '';
+        const envWebhook = process.env.DISCORD_WEBHOOK_URL || '';
+        const canonicalWebhookUrl = validateDiscordWebhookUrl(
+          requestedWebhook.trim() || envWebhook.trim()
+        );
+
+        if (!canonicalWebhookUrl) {
+          res.status(400).json({
+            error:
+              'URL de Webhook Discord invalide ou absente. Configurez-la dans Gazette Discord.',
+          });
+          return;
+        }
+
+        const title =
+          typeof body.title === 'string' ? body.title.trim().slice(0, 180) : '';
+        const description =
+          typeof body.description === 'string'
+            ? body.description.trim().slice(0, 1600)
+            : '';
+        if (!title && !description) {
+          res.status(400).json({ error: 'Contenu d’alerte vide.' });
+          return;
+        }
+
+        const severityColors: Record<string, number> = {
+          critical: 0xdc2626,
+          warning: 0xd97706,
+          info: 0xc5a15a,
+          success: 0x10b981,
+        };
+        const severity =
+          typeof body.severity === 'string' && body.severity in severityColors
+            ? body.severity
+            : 'warning';
+
+        const rawFields = Array.isArray(body.fields) ? body.fields : [];
+        const fields = rawFields
+          .slice(0, 8)
+          .filter((f): f is Record<string, unknown> => Boolean(f) && typeof f === 'object')
+          .map((f) => ({
+            name: typeof f.name === 'string' ? f.name.trim().slice(0, 120) : '-',
+            value: typeof f.value === 'string' ? f.value.trim().slice(0, 950) : '-',
+            inline: Boolean(f.inline),
+          }))
+          .filter((f) => f.name.length > 0 && f.value.length > 0);
+
+        const footerText =
+          typeof body.footer === 'string' && body.footer.trim()
+            ? body.footer.trim().slice(0, 140)
+            : 'Los Cerberos · Alerte Instantanée';
+
+        const discordRes = await fetch(canonicalWebhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: 'Los Cerberos · Alertes',
+            allowed_mentions: { parse: [] },
+            embeds: [
+              {
+                title: title || 'Alerte Cartel — Los Cerberos',
+                description,
+                color: severityColors[severity],
+                fields,
+                footer: { text: footerText },
+                timestamp: new Date().toISOString(),
+              },
+            ],
+          }),
+          redirect: 'error',
+        });
+
+        if (!discordRes.ok) {
+          res.status(502).json({
+            error: `Discord a refusé l’alerte (HTTP ${discordRes.status}).`,
+          });
+          return;
+        }
+
+        res.json({ ok: true });
+      } catch {
+        res.status(500).json({
+          error: 'Erreur serveur lors de l’envoi de l’alerte Discord.',
         });
       }
     }

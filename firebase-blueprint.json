@@ -313,6 +313,10 @@
         "autoEnabled": {
           "type": "boolean"
         },
+        "alertsEnabled": {
+          "type": "boolean",
+          "description": "Whether instant Discord alerts for critical stock and major mission failures are active"
+        },
         "sendHour": {
           "type": "integer",
           "minimum": 0,
@@ -393,6 +397,28 @@
         }
       },
       "required": ["archives", "currentPayroll", "updatedAt", "updatedBy"]
+    },
+    "FleetState": {
+      "title": "FleetState",
+      "description": "Shared cartel garage and vehicle fleet registry (armored, sports, helicopters, boats, utility)",
+      "type": "object",
+      "properties": {
+        "vehicles": {
+          "type": "object",
+          "description": "Bounded map (up to 100 vehicles) of cartel fleet entries with plate, category, status, location, assigned member, and condition notes"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        }
+      },
+      "required": ["vehicles", "updatedAt", "updatedBy"]
     }
   },
   "firestore": {
@@ -439,6 +465,10 @@
     "/cartels/{cartelId}/state/history": {
       "schema": { "$ref": "#/entities/HistoryState" },
       "description": "Archived previous weeks and Sunday payroll tracking"
+    },
+    "/cartels/{cartelId}/state/fleet": {
+      "schema": { "$ref": "#/entities/FleetState" },
+      "description": "Live cartel garage and vehicle fleet tracking"
     },
     "/cartels/{cartelId}/albumMedia/{photoId}": {
       "schema": { "$ref": "#/entities/AlbumMedia" },

@@ -81,6 +81,7 @@ service cloud.firestore {
         data.keys().hasOnly([
           'webhookUrl',
           'autoEnabled',
+          'alertsEnabled',
           'sendHour',
           'sendMinute',
           'includePhoto',
@@ -95,6 +96,7 @@ service cloud.firestore {
         data.webhookUrl.size() <= 300 &&
         data.webhookUrl.matches('^$|^https://(discord|discordapp)\\.com/api/webhooks/[0-9]+/[A-Za-z0-9._\\-]+$') &&
         data.autoEnabled is bool &&
+        (!('alertsEnabled' in data) || data.alertsEnabled is bool) &&
         data.sendHour is int && data.sendHour >= 0 && data.sendHour <= 23 &&
         data.sendMinute is int && data.sendMinute >= 0 && data.sendMinute <= 59 &&
         data.includePhoto is bool &&
@@ -222,6 +224,14 @@ service cloud.firestore {
         isValidId(data.updatedBy);
     }
 
+    function isValidFleetState(data) {
+      return data.keys().hasAll(['vehicles', 'updatedAt', 'updatedBy']) &&
+        data.keys().hasOnly(['vehicles', 'updatedAt', 'updatedBy']) &&
+        data.vehicles is map && data.vehicles.size() <= 100 &&
+        data.updatedAt is timestamp &&
+        isValidId(data.updatedBy);
+    }
+
     function isValidStateDoc(stateId, data) {
       return (stateId == 'missions' && isValidMissionsState(data)) ||
         (stateId == 'inventory' && isValidInventoryState(data)) ||
@@ -229,7 +239,8 @@ service cloud.firestore {
         (stateId == 'hierarchy' && isValidHierarchyState(data)) ||
         (stateId == 'catalog' && isValidCatalogState(data)) ||
         (stateId == 'album' && isValidAlbumState(data)) ||
-        (stateId == 'history' && isValidHistoryState(data));
+        (stateId == 'history' && isValidHistoryState(data)) ||
+        (stateId == 'fleet' && isValidFleetState(data));
     }
 
     function isValidStateUpdate(stateId, next, prev) {
@@ -248,7 +259,8 @@ service cloud.firestore {
         (stateId == 'hierarchy' && next.diff(prev).affectedKeys().hasOnly(['members', 'rankings', 'updatedAt', 'updatedBy'])) ||
         (stateId == 'catalog' && next.diff(prev).affectedKeys().hasOnly(['groups', 'updatedAt', 'updatedBy'])) ||
         (stateId == 'album' && next.diff(prev).affectedKeys().hasOnly(['photos', 'favorites', 'updatedAt', 'updatedBy'])) ||
-        (stateId == 'history' && next.diff(prev).affectedKeys().hasOnly(['archives', 'currentPayroll', 'updatedAt', 'updatedBy']));
+        (stateId == 'history' && next.diff(prev).affectedKeys().hasOnly(['archives', 'currentPayroll', 'updatedAt', 'updatedBy'])) ||
+        (stateId == 'fleet' && next.diff(prev).affectedKeys().hasOnly(['vehicles', 'updatedAt', 'updatedBy']));
     }
 
     match /admins/{uid} {
@@ -306,6 +318,7 @@ service cloud.firestore {
               incoming().diff(existing()).affectedKeys().hasOnly([
                 'webhookUrl',
                 'autoEnabled',
+                'alertsEnabled',
                 'sendHour',
                 'sendMinute',
                 'includePhoto',
@@ -356,12 +369,12 @@ service cloud.firestore {
       match /state/{stateId} {
         allow get: if isValidId(cartelId) &&
           isValidId(stateId) &&
-          stateId in ['missions', 'inventory', 'treasury', 'hierarchy', 'catalog', 'album', 'history'] &&
+          stateId in ['missions', 'inventory', 'treasury', 'hierarchy', 'catalog', 'album', 'history', 'fleet'] &&
           (isAdmin() || isCartelMember(cartelId));
         allow list: if false;
         allow create: if isValidId(cartelId) &&
           isValidId(stateId) &&
-          stateId in ['missions', 'inventory', 'treasury', 'hierarchy', 'catalog', 'album', 'history'] &&
+          stateId in ['missions', 'inventory', 'treasury', 'hierarchy', 'catalog', 'album', 'history', 'fleet'] &&
           isCartelEditor(cartelId) &&
           isValidStateDoc(stateId, incoming()) &&
           incoming().updatedBy == request.auth.uid &&
@@ -369,7 +382,7 @@ service cloud.firestore {
           exists(/databases/$(database)/documents/cartels/$(cartelId));
         allow update: if isValidId(cartelId) &&
           isValidId(stateId) &&
-          stateId in ['missions', 'inventory', 'treasury', 'hierarchy', 'catalog', 'album', 'history'] &&
+          stateId in ['missions', 'inventory', 'treasury', 'hierarchy', 'catalog', 'album', 'history', 'fleet'] &&
           isCartelEditor(cartelId) &&
           isValidStateDoc(stateId, incoming()) &&
           incoming().updatedBy == request.auth.uid &&

@@ -1,16 +1,21 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Camera,
+  Bell,
   CheckCircle2,
   Clock,
   Download,
   Eye,
   EyeOff,
+  ImagePlus,
   Lock,
   Newspaper,
   RefreshCw,
   Save,
   Send,
+  Shuffle,
+  Sparkles,
+  Trash2,
+  Trophy,
   X,
 } from 'lucide-react';
 import {
@@ -22,6 +27,7 @@ import type {
   CatalogGroupsMap,
   DiscordGazetteConfig,
   HierarchyMember,
+  HistoryState,
   InventoryPrices,
   InventoryStock,
   MemberRankingsMap,
@@ -33,10 +39,17 @@ import type {
 } from '@/src/types/cartel';
 import {
   buildDailyGazetteData,
+  buildSundayClosingGazetteData,
   type DailyGazetteData,
+  GAZETTE_VISUAL_MOODS,
+  type GazetteVisualMood,
   getAllGazettePhotoChoices,
   renderGazetteCanvasDataUrl,
+  renderSundayClosingCanvasDataUrl,
   sendGazetteToDiscord,
+  sendInstantDiscordAlert,
+  sendSundayClosingToDiscord,
+  type SundayClosingGazetteData,
 } from '@/src/utils/discordGazette';
 import { isoDate } from '@/src/utils/finance';
 
@@ -59,6 +72,7 @@ interface DiscordGazetteModalProps {
   memberRankings: MemberRankingsMap;
   catalogGroups: CatalogGroupsMap;
   albumState: AlbumState;
+  historyState: HistoryState;
   onClose: () => void;
   onSaveConfig: (nextConfig: DiscordGazetteConfig) => Promise<void>;
   onRequestUnlock: () => void;
@@ -84,25 +98,34 @@ export const DiscordGazetteModal: React.FC<DiscordGazetteModalProps> = ({
   memberRankings,
   catalogGroups,
   albumState,
+  historyState,
   onClose,
   onSaveConfig,
   onRequestUnlock,
   onShowToast,
 }) => {
+  const [editionMode, setEditionMode] = useState<'daily' | 'sunday'>('daily');
   const [draftWebhook, setDraftWebhook] = useState('');
   const [draftAutoEnabled, setDraftAutoEnabled] = useState(false);
+  const [draftAlertsEnabled, setDraftAlertsEnabled] = useState(true);
   const [draftHour, setDraftHour] = useState(9);
   const [draftMinute, setDraftMinute] = useState(30);
   const [draftIncludePhoto, setDraftIncludePhoto] = useState(true);
   const [draftCustomMessage, setDraftCustomMessage] = useState('');
   const [selectedPhotoId, setSelectedPhotoId] = useState<string>('');
+  const [visualMood, setVisualMood] = useState<GazetteVisualMood>('auto');
+  const [customUploadedPhotoSrc, setCustomUploadedPhotoSrc] = useState<string>('');
+  const [customUploadedName, setCustomUploadedName] = useState<string>('');
   const [showWebhook, setShowWebhook] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [previewDataUrl, setPreviewDataUrl] = useState<string | null>(null);
   const [previewData, setPreviewData] = useState<DailyGazetteData | null>(null);
+  const [sundayPreviewData, setSundayPreviewData] = useState<SundayClosingGazetteData | null>(null);
   const [isRendering, setIsRendering] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [isTestingAlert, setIsTestingAlert] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const photoChoices = useMemo(
@@ -112,8 +135,10 @@ export const DiscordGazetteModal: React.FC<DiscordGazetteModalProps> = ({
 
   useEffect(() => {
     if (!open) return;
+    setEditionMode(new Date().getDay() === 0 ? 'sunday' : 'daily');
     setDraftWebhook(discordConfig.webhookUrl || '');
     setDraftAutoEnabled(Boolean(discordConfig.autoEnabled));
+    setDraftAlertsEnabled(discordConfig.alertsEnabled ?? true);
     setDraftHour(
       Number.isFinite(discordConfig.sendHour) ? discordConfig.sendHour : 9
     );
@@ -138,27 +163,55 @@ export const DiscordGazetteModal: React.FC<DiscordGazetteModalProps> = ({
     setIsRendering(true);
     setErrorMsg(null);
     try {
-      const data = await buildDailyGazetteData({
-        missionStates,
-        scheduleMeta,
-        inventoryStock,
-        inventoryPrices,
-        weaponsStock,
-        rewardStocks,
-        treasuryMoney,
-        weaponsLossAmount,
-        hierMembers,
-        memberRankings,
-        catalogGroups,
-        albumState,
-        customMessage: draftCustomMessage,
-        selectedPhotoId: selectedPhotoId || undefined,
-      });
-      const url = await renderGazetteCanvasDataUrl(data, {
-        includePhoto: draftIncludePhoto,
-      });
-      setPreviewData(data);
-      setPreviewDataUrl(url);
+      if (editionMode === 'sunday') {
+        const sundayData = await buildSundayClosingGazetteData({
+          missionStates,
+          scheduleMeta,
+          inventoryStock,
+          inventoryPrices,
+          weaponsStock,
+          rewardStocks,
+          treasuryMoney,
+          weaponsLossAmount,
+          hierMembers,
+          memberRankings,
+          catalogGroups,
+          albumState,
+          historyState,
+          customMessage: draftCustomMessage,
+          selectedPhotoId: selectedPhotoId || undefined,
+          customUploadedPhotoSrc: customUploadedPhotoSrc || undefined,
+        });
+        const url = await renderSundayClosingCanvasDataUrl(sundayData, {
+          includePhoto: draftIncludePhoto,
+        });
+        setSundayPreviewData(sundayData);
+        setPreviewDataUrl(url);
+      } else {
+        const data = await buildDailyGazetteData({
+          missionStates,
+          scheduleMeta,
+          inventoryStock,
+          inventoryPrices,
+          weaponsStock,
+          rewardStocks,
+          treasuryMoney,
+          weaponsLossAmount,
+          hierMembers,
+          memberRankings,
+          catalogGroups,
+          albumState,
+          customMessage: draftCustomMessage,
+          selectedPhotoId: selectedPhotoId || undefined,
+          customUploadedPhotoSrc: customUploadedPhotoSrc || undefined,
+          visualMood,
+        });
+        const url = await renderGazetteCanvasDataUrl(data, {
+          includePhoto: draftIncludePhoto,
+        });
+        setPreviewData(data);
+        setPreviewDataUrl(url);
+      }
     } catch (err) {
       setErrorMsg(
         err instanceof Error
@@ -169,6 +222,7 @@ export const DiscordGazetteModal: React.FC<DiscordGazetteModalProps> = ({
       setIsRendering(false);
     }
   }, [
+    editionMode,
     missionStates,
     scheduleMeta,
     inventoryStock,
@@ -181,15 +235,63 @@ export const DiscordGazetteModal: React.FC<DiscordGazetteModalProps> = ({
     memberRankings,
     catalogGroups,
     albumState,
+    historyState,
     draftCustomMessage,
     selectedPhotoId,
+    customUploadedPhotoSrc,
+    visualMood,
     draftIncludePhoto,
   ]);
 
   useEffect(() => {
     if (!open) return;
     void regeneratePreview();
-  }, [open, selectedPhotoId, draftIncludePhoto, regeneratePreview]);
+  }, [
+    open,
+    editionMode,
+    selectedPhotoId,
+    visualMood,
+    customUploadedPhotoSrc,
+    draftIncludePhoto,
+    regeneratePreview,
+  ]);
+
+  const handleRandomScene = () => {
+    if (photoChoices.length === 0) return;
+    const pool = photoChoices.filter((p) => p.id !== selectedPhotoId);
+    const list = pool.length > 0 ? pool : photoChoices;
+    const picked = list[Math.floor(Math.random() * list.length)];
+    if (!picked) return;
+    setCustomUploadedPhotoSrc('');
+    setCustomUploadedName('');
+    setSelectedPhotoId(picked.id);
+  };
+
+  const handleImportCustomImage = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setErrorMsg('Veuillez choisir un fichier image (PNG, JPG ou WebP).');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setErrorMsg('Image trop lourde (maximum 5 Mo).');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setErrorMsg(null);
+        setCustomUploadedPhotoSrc(reader.result);
+        setCustomUploadedName(file.name.slice(0, 40));
+      }
+    };
+    reader.onerror = () => {
+      setErrorMsg('Impossible de lire le fichier image.');
+    };
+    reader.readAsDataURL(file);
+  };
 
   if (!open) return null;
 
@@ -205,6 +307,7 @@ export const DiscordGazetteModal: React.FC<DiscordGazetteModalProps> = ({
     ...discordConfig,
     webhookUrl: trimmedWebhook,
     autoEnabled: draftAutoEnabled,
+    alertsEnabled: draftAlertsEnabled,
     sendHour: Math.max(0, Math.min(23, Math.trunc(Number(draftHour) || 0))),
     sendMinute: Math.max(0, Math.min(59, Math.trunc(Number(draftMinute) || 0))),
     includePhoto: draftIncludePhoto,
@@ -234,6 +337,45 @@ export const DiscordGazetteModal: React.FC<DiscordGazetteModalProps> = ({
     }
   };
 
+  const handleSendTestAlert = async () => {
+    if (readonly || isTestingAlert) return;
+    if (!canSendNow) {
+      setErrorMsg(
+        'Renseignez un lien Webhook Discord valide (ou configurez le Webhook serveur) avant de tester.'
+      );
+      return;
+    }
+    setIsTestingAlert(true);
+    setErrorMsg(null);
+    try {
+      const idToken = await getIdToken();
+      await sendInstantDiscordAlert({
+        idToken,
+        webhookUrl: trimmedWebhook,
+        severity: 'info',
+        title: 'Test des Alertes Instantanées — Los Cerberos',
+        description:
+          'Le canal d’alerte temps réel est opérationnel. Les ruptures de stock critiques (0 restant) et les échecs majeurs / pertes d’armes seront signalés ici automatiquement.',
+        fields: [
+          { name: 'Déclenché par', value: senderName, inline: true },
+          {
+            name: 'Statut alertes',
+            value: draftAlertsEnabled ? 'Activées' : 'Désactivées (enregistrer pour activer)',
+            inline: true,
+          },
+        ],
+        footer: 'Los Cerberos · Test Alerte Instantanée',
+      });
+      onShowToast('Alerte de test envoyée sur Discord.');
+    } catch (err) {
+      setErrorMsg(
+        err instanceof Error ? err.message : 'Échec de l’alerte de test.'
+      );
+    } finally {
+      setIsTestingAlert(false);
+    }
+  };
+
   const handleSendNow = async () => {
     if (readonly || isSending) return;
     if (!canSendNow) {
@@ -246,46 +388,85 @@ export const DiscordGazetteModal: React.FC<DiscordGazetteModalProps> = ({
     setIsSending(true);
     setErrorMsg(null);
     try {
-      const data = await buildDailyGazetteData({
-        missionStates,
-        scheduleMeta,
-        inventoryStock,
-        inventoryPrices,
-        weaponsStock,
-        rewardStocks,
-        treasuryMoney,
-        weaponsLossAmount,
-        hierMembers,
-        memberRankings,
-        catalogGroups,
-        albumState,
-        customMessage: draftCustomMessage,
-        selectedPhotoId: selectedPhotoId || undefined,
-      });
-      const imageBase64 = await renderGazetteCanvasDataUrl(data, {
-        includePhoto: draftIncludePhoto,
-      });
-      setPreviewData(data);
-      setPreviewDataUrl(imageBase64);
-
       const idToken = await getIdToken();
-      await sendGazetteToDiscord({
-        idToken,
-        webhookUrl: trimmedWebhook,
-        imageBase64,
-        data,
-      });
 
-      const todayIso = isoDate(new Date());
-      await onSaveConfig(
-        buildNextConfig({
-          lastSentDate: todayIso,
-          lastSentAt: new Date().toISOString().slice(0, 40),
-          lastSentBy: senderName.slice(0, 80),
-        })
-      );
+      if (editionMode === 'sunday') {
+        const sundayData = await buildSundayClosingGazetteData({
+          missionStates,
+          scheduleMeta,
+          inventoryStock,
+          inventoryPrices,
+          weaponsStock,
+          rewardStocks,
+          treasuryMoney,
+          weaponsLossAmount,
+          hierMembers,
+          memberRankings,
+          catalogGroups,
+          albumState,
+          historyState,
+          customMessage: draftCustomMessage,
+          selectedPhotoId: selectedPhotoId || undefined,
+          customUploadedPhotoSrc: customUploadedPhotoSrc || undefined,
+        });
+        const imageBase64 = await renderSundayClosingCanvasDataUrl(sundayData, {
+          includePhoto: draftIncludePhoto,
+        });
+        setSundayPreviewData(sundayData);
+        setPreviewDataUrl(imageBase64);
 
-      onShowToast('Gazette envoyée sur Discord avec succès.');
+        await sendSundayClosingToDiscord({
+          idToken,
+          webhookUrl: trimmedWebhook,
+          imageBase64,
+          data: sundayData,
+        });
+
+        await onSaveConfig(buildNextConfig());
+        onShowToast('Bilan Spécial Dimanche envoyé sur Discord avec succès.');
+      } else {
+        const data = await buildDailyGazetteData({
+          missionStates,
+          scheduleMeta,
+          inventoryStock,
+          inventoryPrices,
+          weaponsStock,
+          rewardStocks,
+          treasuryMoney,
+          weaponsLossAmount,
+          hierMembers,
+          memberRankings,
+          catalogGroups,
+          albumState,
+          customMessage: draftCustomMessage,
+          selectedPhotoId: selectedPhotoId || undefined,
+          customUploadedPhotoSrc: customUploadedPhotoSrc || undefined,
+          visualMood,
+        });
+        const imageBase64 = await renderGazetteCanvasDataUrl(data, {
+          includePhoto: draftIncludePhoto,
+        });
+        setPreviewData(data);
+        setPreviewDataUrl(imageBase64);
+
+        await sendGazetteToDiscord({
+          idToken,
+          webhookUrl: trimmedWebhook,
+          imageBase64,
+          data,
+        });
+
+        const todayIsoNow = isoDate(new Date());
+        await onSaveConfig(
+          buildNextConfig({
+            lastSentDate: todayIsoNow,
+            lastSentAt: new Date().toISOString().slice(0, 40),
+            lastSentBy: senderName.slice(0, 80),
+          })
+        );
+
+        onShowToast('Gazette envoyée sur Discord avec succès.');
+      }
     } catch (err) {
       setErrorMsg(
         err instanceof Error ? err.message : 'Échec de l’envoi sur Discord.'
@@ -299,7 +480,14 @@ export const DiscordGazetteModal: React.FC<DiscordGazetteModalProps> = ({
     if (!previewDataUrl) return;
     const link = document.createElement('a');
     link.href = previewDataUrl;
-    link.download = `gazette-los-cerberos-${previewData?.todayIso || isoDate(new Date())}.png`;
+    const dateStamp =
+      editionMode === 'sunday'
+        ? sundayPreviewData?.todayIso || isoDate(new Date())
+        : previewData?.todayIso || isoDate(new Date());
+    link.download =
+      editionMode === 'sunday'
+        ? `bilan-dimanche-los-cerberos-${dateStamp}.png`
+        : `gazette-los-cerberos-${dateStamp}.png`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -327,24 +515,54 @@ export const DiscordGazetteModal: React.FC<DiscordGazetteModalProps> = ({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-start justify-between gap-4 border-b border-bronze/40 pb-3.5">
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 border-b border-bronze/40 pb-3.5">
           <div>
             <div className="text-[10px] font-mono uppercase tracking-[0.22em] text-gold-light flex items-center gap-1.5">
               <Newspaper className="w-3.5 h-3.5 text-gold" />
-              Rapport Visuel &amp; Envoi Salon Discord
+              Rapport Visuel, Alertes &amp; Envoi Salon Discord
             </div>
             <h2 className="font-display text-xl sm:text-2xl font-extrabold text-white mt-0.5">
-              La Gazette Quotidienne — Los Cerberos
+              {editionMode === 'sunday'
+                ? 'Édition Spéciale Dimanche — Bilan & Paies'
+                : 'La Gazette Quotidienne — Los Cerberos'}
             </h2>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 rounded-lg bg-obsidian/70 hover:bg-zinc-800 text-zinc-400 hover:text-white transition cursor-pointer"
-            aria-label="Fermer"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2 self-end sm:self-start">
+            <div className="inline-flex rounded-lg bg-obsidian border border-bronze/50 p-0.5">
+              <button
+                type="button"
+                onClick={() => setEditionMode('daily')}
+                className={`px-2.5 py-1.5 rounded-md text-[11px] font-bold inline-flex items-center gap-1.5 transition cursor-pointer ${
+                  editionMode === 'daily'
+                    ? 'bg-gold text-obsidian shadow-sm'
+                    : 'text-zinc-300 hover:text-white'
+                }`}
+              >
+                <Newspaper className="w-3.5 h-3.5" />
+                Quotidienne
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditionMode('sunday')}
+                className={`px-2.5 py-1.5 rounded-md text-[11px] font-bold inline-flex items-center gap-1.5 transition cursor-pointer ${
+                  editionMode === 'sunday'
+                    ? 'bg-gold text-obsidian shadow-sm'
+                    : 'text-zinc-300 hover:text-white'
+                }`}
+              >
+                <Trophy className="w-3.5 h-3.5" />
+                Spéciale Dimanche
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1.5 rounded-lg bg-obsidian/70 hover:bg-zinc-800 text-zinc-400 hover:text-white transition cursor-pointer"
+              aria-label="Fermer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
@@ -395,24 +613,91 @@ export const DiscordGazetteModal: React.FC<DiscordGazetteModalProps> = ({
               )}
             </div>
 
-            {/* Sélecteur photo du jour */}
-            <div className="bg-obsidian/70 border border-bronze/40 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center gap-2.5">
-              <div className="flex items-center gap-2 text-xs font-semibold text-gold-light shrink-0">
-                <Camera className="w-4 h-4 text-gold" />
-                Photo du jour :
+            {/* Studio Visuel du Jour */}
+            <div className="bg-obsidian/70 border border-bronze/45 rounded-xl p-3 space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-gold-light">
+                  <Sparkles className="w-3.5 h-3.5 text-gold" />
+                  Studio Visuel du Jour
+                  <span className="text-[10px] font-normal text-zinc-400">
+                    (change automatiquement chaque matin)
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleRandomScene}
+                    disabled={isRendering || photoChoices.length === 0}
+                    className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-gold/15 hover:bg-gold hover:text-obsidian text-gold-light border border-gold/40 transition inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                  >
+                    <Shuffle className="w-3 h-3" />
+                    Nouvelle scène
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isRendering}
+                    className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-charcoal hover:bg-slateDark text-zinc-200 border border-zinc-700 transition inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                  >
+                    <ImagePlus className="w-3 h-3 text-gold" />
+                    Importer
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImportCustomImage}
+                    className="hidden"
+                  />
+                </div>
               </div>
-              <select
-                value={selectedPhotoId}
-                onChange={(e) => setSelectedPhotoId(e.target.value)}
-                className="flex-1 bg-charcoal border border-zinc-700 focus:border-gold rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none"
-              >
-                <option value="">Rotation automatique quotidienne (Album)</option>
-                {photoChoices.map((photo) => (
-                  <option key={photo.id} value={photo.id}>
-                    {photo.title} {photo.location ? `— ${photo.location}` : ''}
-                  </option>
-                ))}
-              </select>
+
+              {customUploadedPhotoSrc ? (
+                <div className="flex items-center justify-between gap-2 rounded-lg bg-gold/10 border border-gold/40 px-2.5 py-1.5 text-[11px] text-gold-light">
+                  <span className="truncate">
+                    Image importée active : <strong>{customUploadedName || 'Visuel personnalisé'}</strong>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomUploadedPhotoSrc('');
+                      setCustomUploadedName('');
+                    }}
+                    className="text-zinc-300 hover:text-white inline-flex items-center gap-1 shrink-0 cursor-pointer"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    Retirer
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+                  <select
+                    aria-label="Scène visuelle du jour"
+                    value={selectedPhotoId}
+                    onChange={(e) => setSelectedPhotoId(e.target.value)}
+                    className="sm:col-span-7 bg-charcoal border border-zinc-700 focus:border-gold rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none"
+                  >
+                    <option value="">Rotation automatique quotidienne (Scènes IA &amp; Album)</option>
+                    {photoChoices.map((photo) => (
+                      <option key={photo.id} value={photo.id}>
+                        {photo.title} {photo.location ? `— ${photo.location}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    aria-label="Ambiance visuelle"
+                    value={visualMood}
+                    onChange={(e) => setVisualMood(e.target.value as GazetteVisualMood)}
+                    className="sm:col-span-5 bg-charcoal border border-zinc-700 focus:border-gold rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none"
+                  >
+                    {GAZETTE_VISUAL_MOODS.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        Ambiance : {m.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
           </div>
 
@@ -518,7 +803,7 @@ export const DiscordGazetteModal: React.FC<DiscordGazetteModalProps> = ({
                       onChange={(e) => setDraftIncludePhoto(e.target.checked)}
                       className="rounded border-zinc-600 bg-charcoal text-gold focus:ring-gold"
                     />
-                    Inclure la photo de l&apos;album dans l&apos;image
+                    Inclure le visuel du jour dans l&apos;image
                   </label>
 
                   <label className="flex items-start gap-2.5 text-xs text-zinc-200 cursor-pointer">
@@ -530,7 +815,7 @@ export const DiscordGazetteModal: React.FC<DiscordGazetteModalProps> = ({
                     />
                     <span>
                       <strong className="text-gold-light">Envoi automatique quotidien</strong>{' '}
-                      (dès qu&apos;un éditeur ouvre le site après l&apos;heure choisie, 1 fois/jour)
+                      (dès l&apos;heure choisie + tâche serveur Vercel à 09h30 même site fermé)
                     </span>
                   </label>
 
@@ -554,6 +839,31 @@ export const DiscordGazetteModal: React.FC<DiscordGazetteModalProps> = ({
                       onChange={(e) => setDraftMinute(Number(e.target.value))}
                       className="w-14 bg-charcoal border border-zinc-700 focus:border-gold rounded-lg px-2 py-1 text-xs text-white text-center font-mono"
                     />
+                  </div>
+
+                  <div className="pt-1.5 border-t border-bronze/25 flex items-start justify-between gap-2">
+                    <label className="flex items-start gap-2.5 text-xs text-zinc-200 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={draftAlertsEnabled}
+                        onChange={(e) => setDraftAlertsEnabled(e.target.checked)}
+                        className="mt-0.5 rounded border-zinc-600 bg-charcoal text-gold focus:ring-gold"
+                      />
+                      <span>
+                        <strong className="text-gold-light">Alertes Discord instantanées</strong>{' '}
+                        (stocks critiques à 0, échecs majeurs et pertes d&apos;armes)
+                      </span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleSendTestAlert}
+                      disabled={isTestingAlert || isSending || !canSendNow}
+                      title="Envoyer une alerte de test sur Discord"
+                      className="px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-charcoal hover:bg-slateDark text-zinc-200 border border-bronze/50 transition inline-flex items-center gap-1 shrink-0 cursor-pointer disabled:opacity-50"
+                    >
+                      <Bell className="w-3 h-3 text-gold" />
+                      {isTestingAlert ? 'Test...' : 'Tester'}
+                    </button>
                   </div>
                 </div>
 
@@ -598,7 +908,11 @@ export const DiscordGazetteModal: React.FC<DiscordGazetteModalProps> = ({
                     className="flex-1 px-3.5 py-2.5 rounded-xl text-xs font-bold bg-gold hover:bg-gold-light text-obsidian transition inline-flex items-center justify-center gap-1.5 shadow-lg shadow-gold/15 cursor-pointer disabled:opacity-50"
                   >
                     <Send className="w-3.5 h-3.5" />
-                    {isSending ? 'Envoi...' : 'Envoyer sur Discord'}
+                    {isSending
+                      ? 'Envoi...'
+                      : editionMode === 'sunday'
+                        ? 'Envoyer Bilan Dimanche'
+                        : 'Envoyer sur Discord'}
                   </button>
                 </div>
               </>

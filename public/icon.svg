@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Los Cerberos">
+  <rect width="128" height="128" rx="26" fill="#09090b" />
+  <path
+    d="M64 16 L106 32 V64 C106 90 87 107 64 114 C41 107 22 90 22 64 V32 Z"
+    fill="#141418"
+    stroke="#c5a15a"
+    stroke-width="4"
+  />
+  <path
+    d="M64 26 L96 38 V63 C96 84 81 97 64 103 C47 97 32 84 32 63 V38 Z"
+    fill="none"
+    stroke="#8e2024"
+    stroke-width="2"
+    opacity="0.85"
+  />
+  <text
+    x="64"
+    y="74"
+    text-anchor="middle"
+    fill="#e5c886"
+    font-family="Georgia, serif"
+    font-weight="700"
+    font-size="38"
+    letter-spacing="2"
+  >
+    LC
+  </text>
+</svg>

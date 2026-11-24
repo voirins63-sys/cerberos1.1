@@ -7,19 +7,23 @@ import {
   BookOpen,
   Calendar,
   Camera,
+  Car,
   ClipboardCopy,
   ExternalLink,
   Globe,
   LayoutDashboard,
+  LayoutGrid,
   Lock,
   LogIn,
   LogOut,
+  Menu,
   Newspaper,
   Package,
   ShoppingCart,
   Trophy,
   Users,
   Wallet,
+  X,
 } from 'lucide-react';
 import { AccountingView } from '@/src/components/AccountingView';
 import { AlbumView } from '@/src/components/AlbumView';
@@ -28,12 +32,14 @@ import { AuthModal } from '@/src/components/AuthModal';
 import { CatalogView } from '@/src/components/CatalogView';
 import { DashboardHomeView } from '@/src/components/DashboardHomeView';
 import { DiscordGazetteModal } from '@/src/components/DiscordGazetteModal';
+import { GarageView } from '@/src/components/GarageView';
 import { HierarchyView } from '@/src/components/HierarchyView';
 import { InventoryView } from '@/src/components/InventoryView';
 import {
   MissionValidationModal,
   type MissionValidationPayload,
 } from '@/src/components/MissionValidationModal';
+import { OfflineIndicator } from '@/src/components/OfflineIndicator';
 import { OrdersView } from '@/src/components/OrdersView';
 import { PlanningView } from '@/src/components/PlanningView';
 import { RankingView } from '@/src/components/RankingView';
@@ -67,6 +73,7 @@ import {
   createDefaultCurrentPayroll,
   DEFAULT_ALBUM_STATE,
   DEFAULT_DISCORD_CONFIG,
+  DEFAULT_FLEET_STATE,
   DEFAULT_HISTORY_STATE,
   deleteAlbumPhotoWithMedia,
   isValidDiscordWebhookUrl,
@@ -81,6 +88,7 @@ import {
   saveAllMissionEntriesWithSideEffects,
   saveCatalogGroups,
   saveDiscordConfig,
+  saveFleetState,
   saveHierarchyMembers,
   saveHistoryState,
   saveInventoryItem,
@@ -112,6 +120,7 @@ import type {
   CatalogGroupsMap,
   CurrentWeekPayrollState,
   DiscordGazetteConfig,
+  FleetState,
   GearKey,
   HierarchyMember,
   HierarchyUnitKey,
@@ -156,6 +165,8 @@ import {
 } from '@/src/utils/finance';
 import {
   EMPTY_SCHEDULE_META,
+  applyManualMissionMove,
+  applyManualMissionSwap,
   computeRecalculatedSchedule,
   getCurrentWeekTodayName,
   getEffectiveSchedule,
@@ -167,6 +178,7 @@ import {
   buildDailyGazetteData,
   renderGazetteCanvasDataUrl,
   sendGazetteToDiscord,
+  sendInstantDiscordAlert,
 } from '@/src/utils/discordGazette';
 
 const LEGACY_STORAGE_KEYS = {
@@ -344,6 +356,7 @@ export default function App() {
   const [memberRankings, setMemberRankings] = useState<MemberRankingsMap>({});
   const [catalogGroups, setCatalogGroups] = useState<CatalogGroupsMap>(DEFAULT_CATALOG_GROUPS);
   const [albumState, setAlbumState] = useState<AlbumState>(DEFAULT_ALBUM_STATE);
+  const [fleetState, setFleetState] = useState<FleetState>(DEFAULT_FLEET_STATE);
   const [historyState, setHistoryState] = useState<HistoryState>(DEFAULT_HISTORY_STATE);
   const [discordConfig, setDiscordConfig] = useState<DiscordGazetteConfig>(DEFAULT_DISCORD_CONFIG);
   const [discordConfigSynced, setDiscordConfigSynced] = useState(false);
@@ -352,6 +365,7 @@ export default function App() {
   const [groupOrderCarts, setGroupOrderCarts] = useState<Record<string, Record<string, number>>>({});
 
   const [currentTab, setCurrentTab] = useState<TabKey>('home');
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [gazetteModalOpen, setGazetteModalOpen] = useState(false);
   const [validatingMission, setValidatingMission] = useState<{
@@ -462,6 +476,7 @@ export default function App() {
           onCatalog: (groups) => setCatalogGroups(groups),
           onAlbum: (album) => setAlbumState(album),
           onHistory: (history) => setHistoryState(history),
+          onFleet: (fleet) => setFleetState(fleet),
           onRole: (role) => setMemberRole(role),
           onError: (err) => setSyncError(err),
         });
@@ -1798,6 +1813,80 @@ export default function App() {
         `Mission "${mission.name}" validée (${payload.status === 'success' ? 'Réussie' : 'Échouée'})${gearSummary}${cashSummary} !`
       );
     }
+
+    // Instant Discord alerts for critical events (non-blocking)
+    const canSendInstantAlert =
+      (discordConfig.alertsEnabled ?? true) &&
+      (isValidDiscordWebhookUrl(discordConfig.webhookUrl) || hasDiscordEnvFallback);
+
+    if (canSendInstantAlert) {
+      const isMajorFail = payload.status === 'fail' && Boolean(mission.major);
+      const hasWeaponLoss = nextLost.length > 0;
+      const isCriticalStockZero = stockAlert?.variant === 'critical';
+
+      if (isMajorFail || hasWeaponLoss || isCriticalStockZero) {
+        const alertReasons: string[] = [];
+        if (isMajorFail) alertReasons.push(`Échec opération majeure : ${mission.name}`);
+        if (hasWeaponLoss) {
+          alertReasons.push(
+            `${nextLost.length} arme${nextLost.length > 1 ? 's' : ''} perdue${nextLost.length > 1 ? 's' : ''} (${formatMoney(weaponsLossVal)})`
+          );
+        }
+        if (isCriticalStockZero && stockAlert) {
+          alertReasons.push(stockAlert.message.replace(/^🚨\s*/, ''));
+        }
+
+        const alertFields: Array<{ name: string; value: string; inline?: boolean }> = [
+          {
+            name: 'Opération',
+            value: `${mission.name} (${payload.status === 'success' ? 'Réussie' : 'Échouée'})`,
+            inline: true,
+          },
+          {
+            name: 'Équipe',
+            value: payload.players.length > 0 ? payload.players.join(', ') : 'Non renseignée',
+            inline: true,
+          },
+        ];
+        if (hasWeaponLoss) {
+          alertFields.push({
+            name: 'Armes perdues',
+            value: nextLost.map((w) => `${w.name} (${formatMoney(w.value)})`).join(' · '),
+            inline: false,
+          });
+        }
+        if (isCriticalStockZero && stockAlert) {
+          alertFields.push({
+            name: 'Rupture stock',
+            value: stockAlert.message,
+            inline: false,
+          });
+        }
+
+        const alertTitle = isMajorFail
+          ? `Alerte Échec Majeur — ${mission.name}`
+          : hasWeaponLoss
+            ? `Perte d'Arme Signalée — ${mission.name}`
+            : `Rupture de Stock Critique — ${mission.name}`;
+
+        void authUser
+          .getIdToken()
+          .then((idToken) =>
+            sendInstantDiscordAlert({
+              idToken,
+              webhookUrl: discordConfig.webhookUrl,
+              severity: isMajorFail || hasWeaponLoss ? 'critical' : 'warning',
+              title: alertTitle,
+              description: alertReasons.join('\n'),
+              fields: alertFields,
+              footer: `Los Cerberos · Validé par ${authUser.displayName || authUser.email?.split('@')[0] || 'Éditeur'}`,
+            })
+          )
+          .catch(() => {
+            // Non-blocking alert: ignore network failure so mission save is never disrupted
+          });
+      }
+    }
   };
 
   const handleResetMissionFromModal = (missionId: string) => {
@@ -2081,6 +2170,36 @@ export default function App() {
       setSyncError(err instanceof Error ? err : new Error(String(err)))
     );
     showToast("Planning d'origine restauré !");
+  };
+
+  const handleMoveMissionDay = (missionId: string, targetDayName: string) => {
+    if (readonly || !authUser) return;
+    const mission = WEEKLY_SCHEDULE.flatMap((d) => d.missions).find(
+      (m) => m.id === missionId
+    );
+    const nextMeta = applyManualMissionMove(scheduleMeta, missionId, targetDayName);
+    setScheduleMeta(nextMeta);
+    void saveSchedulePlan(authUser.uid, nextMeta).catch((err) =>
+      setSyncError(err instanceof Error ? err : new Error(String(err)))
+    );
+    showToast(
+      `📅 ${mission?.name || 'Mission'} déplacée sur ${targetDayName} !`
+    );
+  };
+
+  const handleSwapMissions = (missionAId: string, missionBId: string) => {
+    if (readonly || !authUser) return;
+    const allMissions = WEEKLY_SCHEDULE.flatMap((d) => d.missions);
+    const mA = allMissions.find((m) => m.id === missionAId);
+    const mB = allMissions.find((m) => m.id === missionBId);
+    const nextMeta = applyManualMissionSwap(scheduleMeta, missionAId, missionBId);
+    setScheduleMeta(nextMeta);
+    void saveSchedulePlan(authUser.uid, nextMeta).catch((err) =>
+      setSyncError(err instanceof Error ? err : new Error(String(err)))
+    );
+    showToast(
+      `🔄 Échange validé : ${mA?.name || 'Mission 1'} ↔ ${mB?.name || 'Mission 2'} !`
+    );
   };
 
   const handleToggleAllWeek = () => {
@@ -3261,6 +3380,30 @@ export default function App() {
     setDiscordConfig(nextConfig);
   };
 
+  const handleSaveFleet = async (nextFleet: FleetState) => {
+    if (readonly || !authUser) return;
+    setFleetState(nextFleet);
+    await saveFleetState(authUser.uid, nextFleet);
+  };
+
+  const handleShareFleetDiscord = async (summary: {
+    title: string;
+    description: string;
+    fields: Array<{ name: string; value: string; inline?: boolean }>;
+  }) => {
+    if (readonly || !authUser) return;
+    const idToken = await authUser.getIdToken();
+    await sendInstantDiscordAlert({
+      idToken,
+      webhookUrl: discordConfig.webhookUrl,
+      severity: 'info',
+      title: summary.title,
+      description: summary.description,
+      fields: summary.fields,
+      footer: `Los Cerberos · État du Garage (${authUser.displayName || authUser.email?.split('@')[0] || 'Éditeur'})`,
+    });
+  };
+
   const handleUpdateCurrentPayroll = (nextPayroll: CurrentWeekPayrollState) => {
     if (readonly || !authUser) return;
     const nextHistory: HistoryState = {
@@ -3634,6 +3777,36 @@ export default function App() {
     document.body.removeChild(textarea);
   };
 
+  const navigateToTab = useCallback((tab: TabKey) => {
+    setCurrentTab(tab);
+    setMobileMenuOpen(false);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+
+  const mobileNavItems: Array<{
+    key: TabKey;
+    label: string;
+    Icon: typeof LayoutDashboard;
+  }> = [
+    { key: 'home', label: 'Accueil', Icon: LayoutDashboard },
+    { key: 'planning', label: 'Planning', Icon: Calendar },
+    { key: 'inventory', label: 'Inventaire', Icon: Package },
+    { key: 'garage', label: 'Garage', Icon: Car },
+    { key: 'orders', label: 'Commandes', Icon: ShoppingCart },
+    { key: 'catalog', label: 'Catalogue', Icon: BookOpen },
+    { key: 'treasury', label: 'Trésorerie', Icon: Wallet },
+    { key: 'accounting', label: 'Comptabilité', Icon: BarChart3 },
+    { key: 'history', label: 'Paye', Icon: Banknote },
+    { key: 'archives', label: 'Archives', Icon: Archive },
+    { key: 'ranking', label: 'Classement', Icon: Trophy },
+    { key: 'hierarchy', label: 'Hiérarchie', Icon: Users },
+    { key: 'album', label: 'Album', Icon: Camera },
+  ];
+
+  const isSecondaryMobileTab = !['home', 'planning', 'inventory', 'garage'].includes(
+    currentTab
+  );
+
   const tabBtnClass = (tab: TabKey) =>
     currentTab === tab
       ? 'px-3 py-2 rounded-lg text-xs font-bold bg-charcoal text-gold-light border-b-2 border-crimson border-t border-x border-t-gold/30 border-x-gold/30 transition flex items-center gap-1.5 shadow-md cursor-pointer whitespace-nowrap shrink-0'
@@ -3753,164 +3926,107 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen pb-16">
-      {/* EN-TÊTE & DASHBOARD GLOBAL */}
+    <div className="min-h-screen pb-24 lg:pb-16">
+      {/* EN-TÊTE COMPACT & RESPONSIVE */}
       <header className="sticky top-0 z-40 bg-obsidian/95 backdrop-blur-md border-b border-crimson/70 shadow-2xl">
-        <div className="border-b border-bronze/35 bg-charcoal/80">
+        <div className="hidden sm:block border-b border-bronze/35 bg-charcoal/80">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-1.5 flex items-center justify-between gap-3 text-[10px] tracking-[0.26em] uppercase">
             <span className="text-gold-light/90 font-semibold truncate">
               Traicionados por el Estado · Juramentados por la Sangre
             </span>
-            <span className="hidden sm:inline text-zinc-400 font-semibold whitespace-nowrap">
+            <span className="hidden md:inline text-zinc-400 font-semibold whitespace-nowrap">
               Discipline · Loyauté · Respect · Fraternité
             </span>
           </div>
         </div>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5">
-          <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3.5">
-            {/* Logo & Titre Cartel GTA RP */}
-            <div className="flex items-center gap-3.5">
-              <div className="relative w-14 h-14 rounded-xl bg-charcoal border-2 border-gold/80 flex items-center justify-center shadow-xl shadow-crimson/35 shrink-0 overflow-hidden group">
-                <img
-                  src="/assets/emblem.webp"
-                  alt="Emblème Los Cerberos"
-                  className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-                />
-              </div>
-              <div>
-                <div className="flex items-center gap-2.5 flex-wrap">
-                  <span className="text-[10px] font-bold tracking-[0.28em] text-crimson-light uppercase">
-                    Organisation Paramilitaire · GTA RP
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setAuthModalOpen(true)}
-                    className={
-                      isUnlocked
-                        ? 'text-[11px] font-bold text-gold-light hover:text-gold underline underline-offset-4 transition cursor-pointer whitespace-nowrap'
-                        : 'text-[11px] font-semibold text-zinc-400 hover:text-gold-light underline underline-offset-4 transition cursor-pointer whitespace-nowrap'
-                    }
-                  >
-                    {isUnlocked ? '👑 Éditeur Actif' : '🔒 Lecture Seule (Déverrouiller)'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleSignOut}
-                    title={`Connecté en tant que ${authUser.displayName || authUser.email}`}
-                    className="inline-flex items-center gap-1 text-[11px] font-medium text-zinc-500 hover:text-white transition cursor-pointer whitespace-nowrap"
-                  >
-                    <LogOut className="w-3 h-3" />
-                    Déconnexion
-                  </button>
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-2.5 sm:py-3.5">
+          <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-2.5 sm:gap-3.5">
+            {/* Logo & Titre Cartel GTA RP + Actions rapides mobile */}
+            <div className="flex items-center justify-between gap-2.5 min-w-0">
+              <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0">
+                <button
+                  type="button"
+                  onClick={() => navigateToTab('home')}
+                  className="relative w-10 h-10 sm:w-14 sm:h-14 rounded-xl bg-charcoal border-2 border-gold/80 flex items-center justify-center shadow-xl shadow-crimson/35 shrink-0 overflow-hidden group cursor-pointer"
+                  aria-label="Accueil Los Cerberos"
+                >
+                  <img
+                    src="/assets/emblem.webp"
+                    alt="Emblème Los Cerberos"
+                    className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                  />
+                </button>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="hidden sm:inline text-[10px] font-bold tracking-[0.28em] text-crimson-light uppercase">
+                      Organisation Paramilitaire · GTA RP
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setAuthModalOpen(true)}
+                      className={
+                        isUnlocked
+                          ? 'text-[11px] font-bold text-gold-light hover:text-gold underline underline-offset-4 transition cursor-pointer whitespace-nowrap'
+                          : 'text-[11px] font-semibold text-zinc-400 hover:text-gold-light underline underline-offset-4 transition cursor-pointer whitespace-nowrap'
+                      }
+                    >
+                      {isUnlocked ? '👑 Éditeur' : '🔒 Lecture seule'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSignOut}
+                      title={`Connecté en tant que ${authUser.displayName || authUser.email}`}
+                      className="hidden sm:inline-flex items-center gap-1 text-[11px] font-medium text-zinc-500 hover:text-white transition cursor-pointer whitespace-nowrap"
+                    >
+                      <LogOut className="w-3 h-3" />
+                      Déconnexion
+                    </button>
+                  </div>
+                  <h1 className="font-display text-base sm:text-2xl font-extrabold tracking-wider text-white mt-0.5 truncate">
+                    LOS CERBEROS{' '}
+                    <span className="hidden sm:inline text-crimson font-normal">—</span>{' '}
+                    <span className="hidden sm:inline text-gold text-sm sm:text-base font-bold">
+                      GESTION CARTEL
+                    </span>
+                  </h1>
                 </div>
-                <h1 className="font-display text-lg sm:text-2xl font-extrabold tracking-wider text-white mt-0.5">
-                  LOS CERBEROS{' '}
-                  <span className="text-crimson font-normal">—</span>{' '}
-                  <span className="text-gold text-sm sm:text-base font-bold">
-                    GESTION CARTEL
-                  </span>
-                </h1>
+              </div>
+
+              {/* Actions rapides mobile (< lg) */}
+              <div className="flex lg:hidden items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setGazetteModalOpen(true)}
+                  title="Gazette Discord"
+                  className="px-2.5 py-2 rounded-lg text-xs font-bold bg-charcoal hover:bg-slateDark text-gold-light border border-gold/45 transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Newspaper className="w-4 h-4 text-gold" />
+                  <span className="hidden xs:inline">Gazette</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMobileMenuOpen((v) => !v)}
+                  aria-label="Ouvrir le menu"
+                  className="p-2 rounded-lg bg-charcoal hover:bg-slateDark text-zinc-100 border border-bronze/55 transition cursor-pointer"
+                >
+                  {mobileMenuOpen ? <X className="w-5 h-5 text-gold" /> : <Menu className="w-5 h-5 text-gold" />}
+                </button>
               </div>
             </div>
 
-            {/* Actions globales (Onglets) */}
-            <div className="flex flex-wrap items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => setCurrentTab('home')}
-                className={tabBtnClass('home')}
-              >
-                <LayoutDashboard className="w-3.5 h-3.5" />
-                Accueil
-              </button>
-              <button
-                type="button"
-                onClick={() => setCurrentTab('planning')}
-                className={tabBtnClass('planning')}
-              >
-                <Calendar className="w-3.5 h-3.5" />
-                Planning
-              </button>
-              <button
-                type="button"
-                onClick={() => setCurrentTab('inventory')}
-                className={tabBtnClass('inventory')}
-              >
-                <Package className="w-3.5 h-3.5" />
-                Inventaire
-              </button>
-              <button
-                type="button"
-                onClick={() => setCurrentTab('orders')}
-                className={tabBtnClass('orders')}
-              >
-                <ShoppingCart className="w-3.5 h-3.5" />
-                Commandes
-              </button>
-              <button
-                type="button"
-                onClick={() => setCurrentTab('catalog')}
-                className={tabBtnClass('catalog')}
-              >
-                <BookOpen className="w-3.5 h-3.5" />
-                Catalogue
-              </button>
-              <button
-                type="button"
-                onClick={() => setCurrentTab('treasury')}
-                className={tabBtnClass('treasury')}
-              >
-                <Wallet className="w-3.5 h-3.5" />
-                Trésorerie
-              </button>
-              <button
-                type="button"
-                onClick={() => setCurrentTab('accounting')}
-                className={tabBtnClass('accounting')}
-              >
-                <BarChart3 className="w-3.5 h-3.5" />
-                Comptabilité
-              </button>
-              <button
-                type="button"
-                onClick={() => setCurrentTab('history')}
-                className={tabBtnClass('history')}
-              >
-                <Banknote className="w-3.5 h-3.5" />
-                Paye
-              </button>
-              <button
-                type="button"
-                onClick={() => setCurrentTab('archives')}
-                className={tabBtnClass('archives')}
-              >
-                <Archive className="w-3.5 h-3.5" />
-                Archives
-              </button>
-              <button
-                type="button"
-                onClick={() => setCurrentTab('ranking')}
-                className={tabBtnClass('ranking')}
-              >
-                <Trophy className="w-3.5 h-3.5" />
-                Classement
-              </button>
-              <button
-                type="button"
-                onClick={() => setCurrentTab('hierarchy')}
-                className={tabBtnClass('hierarchy')}
-              >
-                <Users className="w-3.5 h-3.5" />
-                Hiérarchie
-              </button>
-              <button
-                type="button"
-                onClick={() => setCurrentTab('album')}
-                className={tabBtnClass('album')}
-              >
-                <Camera className="w-3.5 h-3.5" />
-                Album
-              </button>
+            {/* Actions globales (Onglets Desktop >= lg) */}
+            <div className="hidden lg:flex flex-wrap items-center gap-1.5">
+              {mobileNavItems.map(({ key, label, Icon }) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => navigateToTab(key)}
+                  className={tabBtnClass(key)}
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                  {label}
+                </button>
+              ))}
               <a
                 href="https://sunnycom.tech/feed"
                 target="_blank"
@@ -3941,93 +4057,97 @@ export default function App() {
               </button>
             </div>
           </div>
-
-          {/* KPIs / COMPTEURS EN TEMPS RÉEL */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mt-3.5">
-            <div className="bg-charcoal/95 bronze-border rounded-xl p-3 flex flex-col justify-between">
-              <span className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">
-                Missions Réussies
-              </span>
-              <div className="mt-1.5 flex items-baseline justify-between">
-                <span className="font-display text-lg sm:text-xl font-extrabold text-white tabular-nums">
-                  {kpis.successCount} / {TOTAL_WEEKLY_MISSIONS}
-                </span>
-                <span className="text-[10px] text-crimson-light font-mono tabular-nums">
-                  ❌ {kpis.failCount} échec{kpis.failCount > 1 ? 's' : ''}
-                </span>
-              </div>
-            </div>
-
-            <div className="bg-charcoal/95 gold-border rounded-xl p-3 flex flex-col justify-between">
-              <span className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">
-                Trésorerie &amp; Actifs Totaux
-              </span>
-              <div className="mt-1.5 flex items-baseline justify-between">
-                <span className="font-display text-lg sm:text-xl font-extrabold text-gold tabular-nums">
-                  {formatMoney(kpis.totalWealth)}
-                </span>
-                <span className="text-[10px] text-zinc-500 font-mono">Coffre Cartel</span>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setCurrentTab('treasury')}
-              title="Voir le détail des objets à vendre dans la Trésorerie"
-              className="bg-charcoal/95 border border-gold/45 hover:border-gold rounded-xl p-3 flex flex-col justify-between text-left transition cursor-pointer"
-            >
-              <span className="text-[10px] uppercase tracking-wider text-gold-light font-semibold">
-                💎 Objets à Vendre (Recel)
-              </span>
-              <div className="mt-1.5 flex items-baseline justify-between gap-2">
-                <span className="font-display text-lg sm:text-xl font-extrabold text-gold tabular-nums">
-                  {formatMoney(kpis.rewardsValTotal)}
-                </span>
-                <span className="text-[10px] text-zinc-400 font-mono tabular-nums">
-                  {kpis.rewardsItemCount} objet{kpis.rewardsItemCount > 1 ? 's' : ''}
-                </span>
-              </div>
-            </button>
-
-            <div className="bg-charcoal/95 bronze-border rounded-xl p-3 flex flex-col justify-between">
-              <span className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">
-                Gains Bruts Encaissés
-              </span>
-              <div className="mt-1.5 flex items-baseline justify-between">
-                <span className="font-display text-lg sm:text-xl font-extrabold text-emerald-400 tabular-nums">
-                  {formatMoney(kpis.grossGains)}
-                </span>
-                <span className="text-[10px] text-emerald-500/80 font-mono">Butin total</span>
-              </div>
-            </div>
-
-            <div className="bg-charcoal/95 bronze-border rounded-xl p-3 flex flex-col justify-between">
-              <span className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">
-                Bénéfice Net du Cartel
-              </span>
-              <div className="mt-1.5 flex items-baseline justify-between">
-                <span
-                  className={`font-display text-lg sm:text-xl font-extrabold mt-0.5 truncate tabular-nums ${
-                    kpis.netProfit > 0
-                      ? 'text-emerald-400'
-                      : kpis.netProfit < 0
-                        ? 'text-crimson-light'
-                        : 'text-white'
-                  }`}
-                >
-                  {formatMoney(kpis.netProfit)}
-                </span>
-                <span className="text-[10px] text-zinc-500 font-mono">
-                  Gains - Mat. - Pertes
-                </span>
-              </div>
-            </div>
-          </div>
         </div>
       </header>
 
+      {/* KPIs / COMPTEURS EN TEMPS RÉEL (Défilement naturel pour libérer tout l'écran sur mobile) */}
+      <section className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 pt-3 sm:pt-4">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-2 sm:gap-3">
+          <div className="col-span-2 lg:col-span-1 lg:order-2 bg-charcoal/95 gold-border rounded-xl p-2.5 sm:p-3 flex flex-col justify-between">
+            <span className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">
+              Trésorerie &amp; Actifs Totaux
+            </span>
+            <div className="mt-1 sm:mt-1.5 flex items-baseline justify-between gap-2">
+              <span className="font-display text-lg sm:text-xl font-extrabold text-gold tabular-nums">
+                {formatMoney(kpis.totalWealth)}
+              </span>
+              <span className="text-[10px] text-zinc-500 font-mono">Coffre Cartel</span>
+            </div>
+          </div>
+
+          <div className="lg:order-1 bg-charcoal/95 bronze-border rounded-xl p-2.5 sm:p-3 flex flex-col justify-between">
+            <span className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">
+              Missions Réussies
+            </span>
+            <div className="mt-1 sm:mt-1.5 flex items-baseline justify-between gap-1.5 flex-wrap">
+              <span className="font-display text-base sm:text-xl font-extrabold text-white tabular-nums">
+                {kpis.successCount} / {TOTAL_WEEKLY_MISSIONS}
+              </span>
+              <span className="text-[10px] text-crimson-light font-mono tabular-nums">
+                ❌ {kpis.failCount}
+              </span>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => navigateToTab('treasury')}
+            title="Voir le détail des objets à vendre dans la Trésorerie"
+            className="lg:order-3 bg-charcoal/95 border border-gold/45 hover:border-gold rounded-xl p-2.5 sm:p-3 flex flex-col justify-between text-left transition cursor-pointer"
+          >
+            <span className="text-[10px] uppercase tracking-wider text-gold-light font-semibold truncate">
+              💎 Recel à Vendre
+            </span>
+            <div className="mt-1 sm:mt-1.5 flex items-baseline justify-between gap-1.5 flex-wrap">
+              <span className="font-display text-base sm:text-xl font-extrabold text-gold tabular-nums">
+                {formatMoney(kpis.rewardsValTotal)}
+              </span>
+              <span className="text-[10px] text-zinc-400 font-mono tabular-nums">
+                {kpis.rewardsItemCount} obj.
+              </span>
+            </div>
+          </button>
+
+          <div className="lg:order-4 bg-charcoal/95 bronze-border rounded-xl p-2.5 sm:p-3 flex flex-col justify-between">
+            <span className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">
+              Gains Bruts
+            </span>
+            <div className="mt-1 sm:mt-1.5 flex items-baseline justify-between gap-1.5 flex-wrap">
+              <span className="font-display text-base sm:text-xl font-extrabold text-emerald-400 tabular-nums">
+                {formatMoney(kpis.grossGains)}
+              </span>
+              <span className="hidden sm:inline text-[10px] text-emerald-500/80 font-mono">
+                Butin total
+              </span>
+            </div>
+          </div>
+
+          <div className="lg:order-5 bg-charcoal/95 bronze-border rounded-xl p-2.5 sm:p-3 flex flex-col justify-between">
+            <span className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">
+              Bénéfice Net
+            </span>
+            <div className="mt-1 sm:mt-1.5 flex items-baseline justify-between gap-1.5 flex-wrap">
+              <span
+                className={`font-display text-base sm:text-xl font-extrabold truncate tabular-nums ${
+                  kpis.netProfit > 0
+                    ? 'text-emerald-400'
+                    : kpis.netProfit < 0
+                      ? 'text-crimson-light'
+                      : 'text-white'
+                }`}
+              >
+                {formatMoney(kpis.netProfit)}
+              </span>
+              <span className="hidden sm:inline text-[10px] text-zinc-500 font-mono">
+                Net semaine
+              </span>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* CONTENU PRINCIPAL */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+      <main className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6">
         {/* BANNIÈRE SEMAINE */}
         {staleWeek ? (
           <div className="bg-gold/10 border border-gold/45 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-gold-light text-xs">
@@ -4114,6 +4234,8 @@ export default function App() {
             onToggleAllWeek={handleToggleAllWeek}
             onRecalculateSchedule={handleRecalculateScheduleNow}
             onResetScheduleOverrides={handleResetScheduleOverrides}
+            onMoveMissionDay={handleMoveMissionDay}
+            onSwapMissions={handleSwapMissions}
             onSendToEminenceCart={handleSendToEminenceCart}
           />
         )}
@@ -4144,6 +4266,20 @@ export default function App() {
             onUpdateRewardQty={handleUpdateRewardQty}
             onSellRewards={handleSellRewards}
             onShowToast={showToast}
+          />
+        )}
+
+        {currentTab === 'garage' && (
+          <GarageView
+            fleetState={fleetState}
+            members={hierMembers}
+            readonly={readonly}
+            canSendDiscord={
+              isValidDiscordWebhookUrl(discordConfig.webhookUrl) || hasDiscordEnvFallback
+            }
+            onSaveFleet={handleSaveFleet}
+            onShareFleetDiscord={handleShareFleetDiscord}
+            onShowToast={(msg) => showToast(msg)}
           />
         )}
 
@@ -4317,12 +4453,177 @@ export default function App() {
         )}
       </main>
 
-      <footer className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 pb-8 border-t border-bronze/30 flex flex-col sm:flex-row items-center justify-between gap-2 text-[10px] tracking-[0.24em] uppercase text-zinc-500">
+      <footer className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 pb-8 border-t border-bronze/30 flex flex-col sm:flex-row items-center justify-between gap-2 text-[10px] tracking-[0.24em] uppercase text-zinc-500 text-center sm:text-left">
         <span className="text-gold/80 font-semibold">
           TRAICIONADOS POR EL ESTADO, JURAMENTADOS POR LA SANGRE
         </span>
         <span>LOS CERBEROS · GTA RP</span>
       </footer>
+
+      {/* BARRE DE NAVIGATION MOBILE FIXE EN BAS */}
+      <nav
+        aria-label="Navigation mobile"
+        className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-obsidian/95 backdrop-blur-lg border-t border-gold/30 pb-safe shadow-[0_-8px_24px_rgba(0,0,0,0.75)]"
+      >
+        <div className="grid grid-cols-5 items-stretch">
+          {(
+            [
+              { key: 'home', label: 'Accueil', Icon: LayoutDashboard },
+              { key: 'planning', label: 'Planning', Icon: Calendar },
+              { key: 'inventory', label: 'Stock', Icon: Package },
+              { key: 'garage', label: 'Garage', Icon: Car },
+            ] as const
+          ).map(({ key, label, Icon }) => {
+            const active = currentTab === key && !mobileMenuOpen;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => navigateToTab(key)}
+                className={`flex flex-col items-center justify-center gap-1 py-2.5 px-1 transition cursor-pointer ${
+                  active ? 'text-gold-light' : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                <Icon className={`w-5 h-5 ${active ? 'text-gold' : ''}`} />
+                <span className="text-[10px] font-bold tracking-wide leading-none">
+                  {label}
+                </span>
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => setMobileMenuOpen((v) => !v)}
+            className={`flex flex-col items-center justify-center gap-1 py-2.5 px-1 transition cursor-pointer ${
+              mobileMenuOpen || isSecondaryMobileTab
+                ? 'text-gold-light'
+                : 'text-zinc-400 hover:text-white'
+            }`}
+          >
+            <LayoutGrid
+              className={`w-5 h-5 ${
+                mobileMenuOpen || isSecondaryMobileTab ? 'text-gold' : ''
+              }`}
+            />
+            <span className="text-[10px] font-bold tracking-wide leading-none">
+              Plus
+            </span>
+          </button>
+        </div>
+      </nav>
+
+      {/* MENU TIROIR MOBILE COMPLET */}
+      {mobileMenuOpen && (
+        <div
+          className="lg:hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end"
+          onClick={() => setMobileMenuOpen(false)}
+        >
+          <div
+            className="w-full max-h-[85vh] overflow-y-auto bg-charcoal border-t border-gold/45 rounded-t-2xl p-4 pb-safe shadow-2xl space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-10 h-1 rounded-full bg-zinc-700 mx-auto" />
+            <div className="flex items-center justify-between gap-3 border-b border-bronze/40 pb-3">
+              <div className="min-w-0">
+                <div className="text-[10px] font-mono uppercase tracking-[0.22em] text-gold-light">
+                  Navigation Cartel
+                </div>
+                <div className="text-xs text-zinc-400 truncate mt-0.5">
+                  {authUser.displayName || authUser.email}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMobileMenuOpen(false)}
+                className="p-2 rounded-lg bg-obsidian text-zinc-400 hover:text-white transition cursor-pointer"
+                aria-label="Fermer le menu"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              {mobileNavItems.map(({ key, label, Icon }) => {
+                const active = currentTab === key;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => navigateToTab(key)}
+                    className={`flex flex-col items-center justify-center gap-1.5 rounded-xl p-3 text-center transition cursor-pointer ${
+                      active
+                        ? 'bg-gold/15 border border-gold text-gold-light shadow-md'
+                        : 'bg-obsidian/80 border border-bronze/40 text-zinc-300 hover:text-white hover:border-gold/50'
+                    }`}
+                  >
+                    <Icon className={`w-5 h-5 ${active ? 'text-gold' : 'text-zinc-400'}`} />
+                    <span className="text-[11px] font-bold leading-tight">{label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 pt-2 border-t border-bronze/35">
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  setGazetteModalOpen(true);
+                }}
+                className="px-3 py-2.5 rounded-xl text-xs font-bold bg-obsidian border border-gold/45 text-gold-light flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Newspaper className="w-4 h-4 text-gold" />
+                Gazette Discord
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  void handleCopyReport();
+                }}
+                className="px-3 py-2.5 rounded-xl text-xs font-bold bg-gold text-obsidian flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <ClipboardCopy className="w-4 h-4" />
+                Copier Bilan
+              </button>
+              <a
+                href="https://sunnycom.tech/feed"
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setMobileMenuOpen(false)}
+                className="px-3 py-2.5 rounded-xl text-xs font-bold bg-emerald-950/70 border border-emerald-500/45 text-emerald-200 flex items-center justify-center gap-1.5"
+              >
+                <Globe className="w-4 h-4 text-emerald-400" />
+                SunnyCom
+                <ExternalLink className="w-3 h-3" />
+              </a>
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  setAuthModalOpen(true);
+                }}
+                className="px-3 py-2.5 rounded-xl text-xs font-bold bg-obsidian border border-bronze/50 text-zinc-200 flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Lock className="w-4 h-4 text-gold" />
+                {isUnlocked ? 'Mode Éditeur' : 'Déverrouiller'}
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setMobileMenuOpen(false);
+                void handleSignOut();
+              }}
+              className="w-full py-2.5 rounded-xl text-xs font-semibold bg-obsidian/70 border border-zinc-800 text-zinc-400 hover:text-white flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <LogOut className="w-4 h-4" />
+              Déconnexion
+            </button>
+          </div>
+        </div>
+      )}
 
       <AuthModal
         open={authModalOpen}
@@ -4352,6 +4653,7 @@ export default function App() {
         memberRankings={memberRankings}
         catalogGroups={catalogGroups}
         albumState={albumState}
+        historyState={historyState}
         onClose={() => setGazetteModalOpen(false)}
         onSaveConfig={handleSaveDiscordConfig}
         onRequestUnlock={() => {
@@ -4382,6 +4684,8 @@ export default function App() {
         onConfirm={handleConfirmMissionValidation}
         onResetMission={handleResetMissionFromModal}
       />
+
+      <OfflineIndicator />
 
       <Toast
         message={toastState?.message ?? null}

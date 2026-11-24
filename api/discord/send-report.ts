@@ -113,7 +113,7 @@ function sanitizeEmbed(raw: unknown): SanitizedEmbedPayload | null {
     .filter((f): f is Record<string, unknown> => Boolean(f) && typeof f === 'object')
     .map((f) => ({
       name: typeof f.name === 'string' ? f.name.trim().slice(0, 120) : '-',
-      value: typeof f.value === 'string' ? f.value.trim().slice(0, 500) : '-',
+      value: typeof f.value === 'string' ? f.value.trim().slice(0, 950) : '-',
       inline: Boolean(f.inline),
     }))
     .filter((f) => f.name.length > 0 && f.value.length > 0);

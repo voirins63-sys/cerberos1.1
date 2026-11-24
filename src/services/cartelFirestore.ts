@@ -37,6 +37,7 @@ import type {
   AlbumPhotoCategory,
   AlbumPhotoRecord,
   AlbumState,
+  CartelVehicle,
   CatalogContact,
   CatalogGroup,
   CatalogGroupColor,
@@ -47,6 +48,7 @@ import type {
   CurrentWeekPayrollState,
   DiscordGazetteConfig,
   DistinctionKey,
+  FleetState,
   GearKey,
   HierarchyMember,
   HierarchyUnitKey,
@@ -64,6 +66,8 @@ import type {
   RewardStockEntry,
   RewardStocks,
   TreasuryMoney,
+  VehicleCategory,
+  VehicleStatus,
   WeaponEntry,
   WeaponsStock,
   WeeklyArchiveDayRow,
@@ -801,6 +805,89 @@ export function sanitizeHistoryState(raw: unknown): HistoryState {
   };
 }
 
+const VALID_VEHICLE_CATEGORIES = new Set<VehicleCategory>([
+  'blinde',
+  'sportive',
+  'suv',
+  'moto',
+  'helico',
+  'bateau',
+  'utilitaire',
+]);
+
+const VALID_VEHICLE_STATUSES = new Set<VehicleStatus>([
+  'disponible',
+  'en_mission',
+  'fourriere',
+  'reparation',
+]);
+
+export const DEFAULT_FLEET_STATE: FleetState = {
+  vehicles: {},
+};
+
+export function sanitizeFleetState(raw: unknown): FleetState {
+  if (!raw || typeof raw !== 'object') {
+    return { vehicles: {} };
+  }
+  const obj = raw as { vehicles?: unknown };
+  const rawMap =
+    obj.vehicles && typeof obj.vehicles === 'object'
+      ? (obj.vehicles as Record<string, unknown>)
+      : {};
+  const vehicles: Record<string, CartelVehicle> = {};
+
+  Object.entries(rawMap)
+    .slice(0, 100)
+    .forEach(([key, entry]) => {
+      if (!entry || typeof entry !== 'object') return;
+      const v = entry as Record<string, unknown>;
+      const rawId = typeof v.id === 'string' && v.id.trim() ? v.id : key;
+      const id = rawId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+      const name = typeof v.name === 'string' ? v.name.trim().slice(0, 80) : '';
+      if (!id || !name) return;
+
+      const category: VehicleCategory =
+        typeof v.category === 'string' &&
+        VALID_VEHICLE_CATEGORIES.has(v.category as VehicleCategory)
+          ? (v.category as VehicleCategory)
+          : 'suv';
+      const status: VehicleStatus =
+        typeof v.status === 'string' &&
+        VALID_VEHICLE_STATUSES.has(v.status as VehicleStatus)
+          ? (v.status as VehicleStatus)
+          : 'disponible';
+
+      vehicles[id] = {
+        id,
+        name,
+        plate: typeof v.plate === 'string' ? v.plate.trim().toUpperCase().slice(0, 20) : '',
+        category,
+        status,
+        location:
+          typeof v.location === 'string' && v.location.trim()
+            ? v.location.trim().slice(0, 80)
+            : 'Garage Hacienda',
+        assignedToId:
+          typeof v.assignedToId === 'string'
+            ? v.assignedToId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64)
+            : '',
+        assignedToName:
+          typeof v.assignedToName === 'string' ? v.assignedToName.trim().slice(0, 80) : '',
+        armorLevel:
+          typeof v.armorLevel === 'string' ? v.armorLevel.trim().slice(0, 40) : 'Standard',
+        value: Math.max(0, Math.round(Number(v.value) || 0)),
+        notes: typeof v.notes === 'string' ? v.notes.trim().slice(0, 220) : '',
+        updatedAtIso:
+          typeof v.updatedAtIso === 'string' && v.updatedAtIso.trim()
+            ? v.updatedAtIso.trim().slice(0, 40)
+            : new Date().toISOString().slice(0, 40),
+      };
+    });
+
+  return { vehicles };
+}
+
 export async function bootstrapAndJoinCartel(
   user: User,
   seed: LocalSeedData
@@ -996,6 +1083,25 @@ export async function bootstrapAndJoinCartel(
         handleFirestoreError(error, OperationType.CREATE, `cartels/${CARTEL_ID}/state/history`);
       }
     }
+
+    const fleetRef = doc(db, 'cartels', CARTEL_ID, 'state', 'fleet');
+    let fleetSnap;
+    try {
+      fleetSnap = await getDoc(fleetRef);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, `cartels/${CARTEL_ID}/state/fleet`);
+    }
+    if (!fleetSnap.exists()) {
+      try {
+        await setDoc(fleetRef, {
+          vehicles: {},
+          updatedAt: serverTimestamp(),
+          updatedBy: user.uid,
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.CREATE, `cartels/${CARTEL_ID}/state/fleet`);
+      }
+    }
   }
 
   let memberSnap;
@@ -1045,6 +1151,7 @@ export function subscribeCartelState(
     onCatalog?: (groups: CatalogGroupsMap) => void;
     onAlbum?: (album: AlbumState) => void;
     onHistory?: (history: HistoryState) => void;
+    onFleet?: (fleet: FleetState) => void;
     onRole: (role: MemberRole) => void;
     onError: (err: Error) => void;
   }
@@ -1218,6 +1325,24 @@ export function subscribeCartelState(
     }
   );
 
+  const unsubFleet = onSnapshot(
+    doc(db, 'cartels', CARTEL_ID, 'state', 'fleet'),
+    (snap) => {
+      if (!snap.exists()) {
+        callbacks.onFleet?.({ vehicles: {} });
+        return;
+      }
+      callbacks.onFleet?.(sanitizeFleetState(snap.data()));
+    },
+    (error) => {
+      try {
+        handleFirestoreError(error, OperationType.GET, `cartels/${CARTEL_ID}/state/fleet`);
+      } catch (err) {
+        callbacks.onError(err instanceof Error ? err : new Error(String(err)));
+      }
+    }
+  );
+
   return () => {
     unsubMissions();
     unsubInventory();
@@ -1227,6 +1352,7 @@ export function subscribeCartelState(
     unsubCatalog();
     unsubAlbum();
     unsubHistory();
+    unsubFleet();
   };
 }
 
@@ -2090,6 +2216,7 @@ export const DISCORD_WEBHOOK_URL_REGEX =
 export const DEFAULT_DISCORD_CONFIG: DiscordGazetteConfig = {
   webhookUrl: '',
   autoEnabled: true,
+  alertsEnabled: true,
   sendHour: 9,
   sendMinute: 30,
   includePhoto: true,
@@ -2129,6 +2256,7 @@ export function sanitizeDiscordConfig(raw: unknown): DiscordGazetteConfig {
   return {
     webhookUrl,
     autoEnabled: obj.autoEnabled === undefined ? true : Boolean(obj.autoEnabled),
+    alertsEnabled: obj.alertsEnabled === undefined ? true : Boolean(obj.alertsEnabled),
     sendHour,
     sendMinute,
     includePhoto: obj.includePhoto === undefined ? true : Boolean(obj.includePhoto),
@@ -2138,6 +2266,23 @@ export function sanitizeDiscordConfig(raw: unknown): DiscordGazetteConfig {
     lastSentAt: typeof obj.lastSentAt === 'string' ? obj.lastSentAt.trim().slice(0, 40) : '',
     lastSentBy: typeof obj.lastSentBy === 'string' ? obj.lastSentBy.trim().slice(0, 80) : '',
   };
+}
+
+export async function saveFleetState(
+  uid: string,
+  fleet: FleetState
+): Promise<void> {
+  const path = `cartels/${CARTEL_ID}/state/fleet`;
+  const clean = sanitizeFleetState(fleet);
+  try {
+    await setDoc(doc(db, 'cartels', CARTEL_ID, 'state', 'fleet'), {
+      vehicles: clean.vehicles,
+      updatedAt: serverTimestamp(),
+      updatedBy: uid,
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
 }
 
 export function subscribeDiscordConfig(callbacks: {

@@ -277,6 +277,7 @@ export interface AlbumState {
 export interface DiscordGazetteConfig {
   webhookUrl: string;
   autoEnabled: boolean;
+  alertsEnabled?: boolean;
   sendHour: number;
   sendMinute: number;
   includePhoto: boolean;
@@ -284,6 +285,36 @@ export interface DiscordGazetteConfig {
   lastSentDate: string;
   lastSentAt: string;
   lastSentBy: string;
+}
+
+export type VehicleCategory =
+  | 'blinde'
+  | 'sportive'
+  | 'suv'
+  | 'moto'
+  | 'helico'
+  | 'bateau'
+  | 'utilitaire';
+
+export type VehicleStatus = 'disponible' | 'en_mission' | 'fourriere' | 'reparation';
+
+export interface CartelVehicle {
+  id: string;
+  name: string;
+  plate: string;
+  category: VehicleCategory;
+  status: VehicleStatus;
+  location: string;
+  assignedToId: string;
+  assignedToName: string;
+  armorLevel: string;
+  value: number;
+  notes: string;
+  updatedAtIso: string;
+}
+
+export interface FleetState {
+  vehicles: Record<string, CartelVehicle>;
 }
 
 export type PayrollBasis = 'net_cartel' | 'net_member';
@@ -409,6 +440,7 @@ export type TabKey =
   | 'home'
   | 'planning'
   | 'inventory'
+  | 'garage'
   | 'orders'
   | 'catalog'
   | 'treasury'

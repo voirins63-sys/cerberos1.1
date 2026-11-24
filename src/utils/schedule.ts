@@ -265,11 +265,22 @@ export function computeRecalculatedSchedule(params: {
         return;
       }
 
-      if (origIdx >= targetStartIdx) {
-        // Undone mission scheduled for today or a future day: stays on its baseline day
-        typeCountOnDay[origIdx][typeKey] = (typeCountOnDay[origIdx][typeKey] || 0) + 1;
-        totalCountOnDay[origIdx]++;
-        if (m.major) majorCountOnDay[origIdx]++;
+      const prevOverrideDay = prevOverrides[m.id];
+      const effectiveIdx =
+        prevOverrideDay && DAY_NAMES.includes(prevOverrideDay)
+          ? DAY_NAMES.indexOf(prevOverrideDay)
+          : origIdx;
+
+      if (effectiveIdx >= targetStartIdx) {
+        // Undone mission scheduled (baseline or manually moved) for today or a future day: keep it there
+        const keepDay = DAY_NAMES[effectiveIdx];
+        if (keepDay !== dayObj.day) {
+          nextOverrides[m.id] = keepDay;
+        }
+        typeCountOnDay[effectiveIdx][typeKey] =
+          (typeCountOnDay[effectiveIdx][typeKey] || 0) + 1;
+        totalCountOnDay[effectiveIdx]++;
+        if (m.major) majorCountOnDay[effectiveIdx]++;
         weeklyTypeCount[typeKey] = (weeklyTypeCount[typeKey] || 0) + 1;
         return;
       }
@@ -362,4 +373,117 @@ export function computeRecalculatedSchedule(params: {
     unplacedCount: nextUnplacedIds.length,
     changed,
   };
+}
+
+function getOriginalDayMap(): Record<string, string> {
+  const map: Record<string, string> = {};
+  WEEKLY_SCHEDULE.forEach((d) => {
+    d.missions.forEach((m) => {
+      map[m.id] = d.day;
+    });
+  });
+  return map;
+}
+
+export function applyManualMissionMove(
+  currentMeta: MissionScheduleMeta | undefined,
+  missionId: string,
+  targetDayName: string
+): MissionScheduleMeta {
+  if (!DAY_NAMES.includes(targetDayName)) {
+    return currentMeta || EMPTY_SCHEDULE_META;
+  }
+  const origDays = getOriginalDayMap();
+  const nextOverrides: Record<string, string> = {
+    ...(currentMeta?.scheduleOverrides || {}),
+  };
+
+  if (origDays[missionId] === targetDayName) {
+    delete nextOverrides[missionId];
+  } else {
+    nextOverrides[missionId] = targetDayName;
+  }
+
+  const nextUnplaced = (currentMeta?.unplacedMissionIds || []).filter(
+    (id) => id !== missionId
+  );
+
+  return {
+    scheduleOverrides: nextOverrides,
+    unplacedMissionIds: nextUnplaced,
+    lastRecalcDate: currentMeta?.lastRecalcDate || '',
+    lastRecalcAt: currentMeta?.lastRecalcAt || '',
+  };
+}
+
+export function applyManualMissionSwap(
+  currentMeta: MissionScheduleMeta | undefined,
+  missionAId: string,
+  missionBId: string
+): MissionScheduleMeta {
+  if (!missionAId || !missionBId || missionAId === missionBId) {
+    return currentMeta || EMPTY_SCHEDULE_META;
+  }
+  const origDays = getOriginalDayMap();
+  const prevOverrides = currentMeta?.scheduleOverrides || {};
+  const dayA =
+    prevOverrides[missionAId] && DAY_NAMES.includes(prevOverrides[missionAId])
+      ? prevOverrides[missionAId]
+      : origDays[missionAId];
+  const dayB =
+    prevOverrides[missionBId] && DAY_NAMES.includes(prevOverrides[missionBId])
+      ? prevOverrides[missionBId]
+      : origDays[missionBId];
+
+  if (!dayA || !dayB) {
+    return currentMeta || EMPTY_SCHEDULE_META;
+  }
+
+  const nextOverrides: Record<string, string> = { ...prevOverrides };
+
+  if (origDays[missionAId] === dayB) {
+    delete nextOverrides[missionAId];
+  } else {
+    nextOverrides[missionAId] = dayB;
+  }
+
+  if (origDays[missionBId] === dayA) {
+    delete nextOverrides[missionBId];
+  } else {
+    nextOverrides[missionBId] = dayA;
+  }
+
+  const nextUnplaced = (currentMeta?.unplacedMissionIds || []).filter(
+    (id) => id !== missionAId && id !== missionBId
+  );
+
+  return {
+    scheduleOverrides: nextOverrides,
+    unplacedMissionIds: nextUnplaced,
+    lastRecalcDate: currentMeta?.lastRecalcDate || '',
+    lastRecalcAt: currentMeta?.lastRecalcAt || '',
+  };
+}
+
+export function checkDayQuotaForMission(params: {
+  missionStates: MissionStates;
+  scheduleMeta?: MissionScheduleMeta;
+  mission: Mission;
+  targetDayName: string;
+  excludeMissionId?: string;
+}): { ok: boolean; countOnDay: number; dailyLimit: number | null } {
+  const { missionStates, scheduleMeta, mission, targetDayName, excludeMissionId } = params;
+  const typeKey = getMissionTypeKey(mission);
+  const rule = MISSION_REGULATION[typeKey];
+  const effective = getEffectiveSchedule(missionStates, scheduleMeta);
+  const dayBucket = effective.days.find((d) => d.day === targetDayName);
+  const countOnDay = (dayBucket?.missions || []).filter(
+    (m) =>
+      m.id !== mission.id &&
+      m.id !== excludeMissionId &&
+      getMissionTypeKey(m) === typeKey
+  ).length;
+
+  const ok = rule.dailyLimit === null || countOnDay < rule.dailyLimit;
+  return { ok, countOnDay, dailyLimit: rule.dailyLimit };
 }

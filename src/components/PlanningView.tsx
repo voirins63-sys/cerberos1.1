@@ -1,5 +1,14 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Clock, RefreshCw, RotateCcw, ScrollText, AlertTriangle } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import {
+  AlertTriangle,
+  ArrowLeftRight,
+  CalendarDays,
+  Clock,
+  RefreshCw,
+  RotateCcw,
+  ScrollText,
+  X,
+} from 'lucide-react';
 import {
   DAY_NAMES,
   INVENTORY_ITEMS,
@@ -32,11 +41,16 @@ import {
   getMissionCost,
   getMissionEntry,
   getMissionGearLabel,
+  getStatus,
   isTodayName,
   missionFin,
   netClass,
 } from '@/src/utils/finance';
-import { type EffectiveMission, getEffectiveSchedule } from '@/src/utils/schedule';
+import {
+  type EffectiveMission,
+  checkDayQuotaForMission,
+  getEffectiveSchedule,
+} from '@/src/utils/schedule';
 
 interface PlanningViewProps {
   missionStates: MissionStates;
@@ -56,6 +70,8 @@ interface PlanningViewProps {
   onToggleAllWeek: () => void;
   onRecalculateSchedule: () => void;
   onResetScheduleOverrides: () => void;
+  onMoveMissionDay: (missionId: string, targetDayName: string) => void;
+  onSwapMissions: (missionAId: string, missionBId: string) => void;
   onSendToEminenceCart?: (
     catalogItemsQty: Record<string, number>,
     options?: { navigateToOrders?: boolean; replaceCart?: boolean }
@@ -76,28 +92,19 @@ export const PlanningView: React.FC<PlanningViewProps> = ({
   onToggleAllWeek,
   onRecalculateSchedule,
   onResetScheduleOverrides,
+  onMoveMissionDay,
+  onSwapMissions,
   onSendToEminenceCart,
 }) => {
   const [activeFilter, setActiveFilter] = useState<string>('ALL');
   const [showRegulation, setShowRegulation] = useState<boolean>(false);
   const [showUnplaced, setShowUnplaced] = useState<boolean>(false);
-  const [openDays, setOpenDays] = useState<Set<string>>(() => {
-    const today = DAY_NAMES.find((d) => isTodayName(d, missionStates));
-    return new Set(today ? [today] : []);
-  });
-  const didScrollTodayRef = useRef(false);
-  const todayCardRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!didScrollTodayRef.current && activeFilter === 'ALL' && todayCardRef.current) {
-      didScrollTodayRef.current = true;
-      const el = todayCardRef.current;
-      const timer = window.setTimeout(() => {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }, 150);
-      return () => window.clearTimeout(timer);
-    }
-  }, [activeFilter]);
+  const [openDays, setOpenDays] = useState<Set<string>>(() => new Set());
+  const [reschedulingTarget, setReschedulingTarget] = useState<{
+    mission: EffectiveMission;
+    currentDay: string;
+  } | null>(null);
+  const [swapOnlyMajor, setSwapOnlyMajor] = useState<boolean>(false);
 
   const start = displayWeekStart(missionStates);
   const end = new Date(start);
@@ -728,7 +735,6 @@ export const PlanningView: React.FC<PlanningViewProps> = ({
           return (
             <div
               key={dayObj.day}
-              ref={todayCard ? todayCardRef : undefined}
               className={`bg-charcoal/85 gold-border rounded-2xl shadow-xl overflow-hidden flex flex-col transition hover:border-gold/60 ${
                 todayCard ? 'ring-2 ring-gold/80' : ''
               }`}
@@ -870,7 +876,7 @@ export const PlanningView: React.FC<PlanningViewProps> = ({
                                 </span>
                                 {mission.isRescheduled && (
                                   <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                                    🔄 Reportée de {mission.originalDay}
+                                    🔄 Déplacée de {mission.originalDay}
                                   </span>
                                 )}
                               </div>
@@ -959,6 +965,23 @@ export const PlanningView: React.FC<PlanningViewProps> = ({
                               >
                                 ❌ Échouée
                               </button>
+                              {!readonly && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSwapOnlyMajor(Boolean(mission.major));
+                                    setReschedulingTarget({
+                                      mission,
+                                      currentDay: dayObj.day,
+                                    });
+                                  }}
+                                  title="Échanger avec une mission d’un autre jour ou déplacer (cooldown / imprévu)"
+                                  className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-zinc-900 hover:bg-zinc-800 text-gold-light border border-gold/40 transition inline-flex items-center gap-1 shrink-0 cursor-pointer"
+                                >
+                                  <ArrowLeftRight className="w-3.5 h-3.5 text-gold" />
+                                  <span className="hidden sm:inline">Échanger</span>
+                                </button>
+                              )}
                             </div>
 
                             {f.done && (
@@ -1074,6 +1097,211 @@ export const PlanningView: React.FC<PlanningViewProps> = ({
           );
         })}
       </div>
+
+      {/* MODALE ÉCHANGER / DÉPLACER UNE MISSION (COOLDOWN / IMPRÉVU) */}
+      {reschedulingTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-3 sm:p-5 overflow-y-auto"
+          onClick={() => setReschedulingTarget(null)}
+        >
+          <div
+            className="w-full max-w-xl rounded-2xl bg-charcoal gold-border p-4 sm:p-5 shadow-2xl space-y-4 my-auto max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-bronze/40 pb-3">
+              <div>
+                <div className="text-[10px] font-mono uppercase tracking-[0.22em] text-gold-light flex items-center gap-1.5">
+                  <ArrowLeftRight className="w-3.5 h-3.5 text-gold" />
+                  Gestion Cooldown &amp; Imprévu RP
+                </div>
+                <h3 className="font-display text-lg sm:text-xl font-extrabold text-white mt-0.5">
+                  {reschedulingTarget.mission.name}
+                </h3>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  Actuellement prévue le{' '}
+                  <strong className="text-gold-light">{reschedulingTarget.currentDay}</strong>
+                  {reschedulingTarget.mission.isRescheduled
+                    ? ` (jour d’origine : ${reschedulingTarget.mission.originalDay})`
+                    : ''}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReschedulingTarget(null)}
+                className="p-1.5 rounded-lg bg-obsidian text-zinc-400 hover:text-white transition cursor-pointer"
+                aria-label="Fermer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Option 1 : Échanger avec une mission d'un autre jour */}
+            <div className="space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-bold text-gold-light uppercase tracking-wider flex items-center gap-1.5">
+                  <ArrowLeftRight className="w-3.5 h-3.5 text-gold" />
+                  1. Échanger avec une autre mission (ex : Fleeca ↔ Paleto)
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSwapOnlyMajor((v) => !v)}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
+                    swapOnlyMajor
+                      ? 'bg-gold text-obsidian border-gold'
+                      : 'bg-obsidian text-zinc-300 border-zinc-700 hover:border-gold/50'
+                  }`}
+                >
+                  {swapOnlyMajor ? 'Gros Coups uniquement' : 'Toutes les missions'}
+                </button>
+              </div>
+              <p className="text-[11px] text-zinc-400 leading-relaxed">
+                L&apos;échange permute les deux missions entre leurs journées (même si celle que vous venez de faire est déjà validée) : vos gains, pertes et la Gazette restent alignés sur le bon jour.
+              </p>
+
+              <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
+                {effectiveSchedule.days
+                  .filter((d) => d.day !== reschedulingTarget.currentDay)
+                  .flatMap((d) =>
+                    d.missions
+                      .filter((m) => (!swapOnlyMajor ? true : m.major))
+                      .map((m) => ({ day: d.day, mission: m }))
+                  )
+                  .map(({ day, mission: cand }) => {
+                    const candStatus = getStatus(getMissionEntry(missionStates, cand.id));
+                    const quotaA = checkDayQuotaForMission({
+                      missionStates,
+                      scheduleMeta,
+                      mission: reschedulingTarget.mission,
+                      targetDayName: day,
+                      excludeMissionId: cand.id,
+                    });
+                    const quotaB = checkDayQuotaForMission({
+                      missionStates,
+                      scheduleMeta,
+                      mission: cand,
+                      targetDayName: reschedulingTarget.currentDay,
+                      excludeMissionId: reschedulingTarget.mission.id,
+                    });
+                    const quotaOk = quotaA.ok && quotaB.ok;
+
+                    return (
+                      <button
+                        key={cand.id}
+                        type="button"
+                        onClick={() => {
+                          onSwapMissions(reschedulingTarget.mission.id, cand.id);
+                          setOpenDays((prev) => {
+                            const next = new Set(prev);
+                            next.add(reschedulingTarget.currentDay);
+                            return next;
+                          });
+                          setReschedulingTarget(null);
+                        }}
+                        className="w-full text-left px-3 py-2.5 rounded-xl bg-obsidian/80 hover:bg-slateDark border border-bronze/45 hover:border-gold transition flex items-center justify-between gap-2.5 cursor-pointer"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="px-1.5 py-0.5 rounded bg-charcoal border border-gold/40 text-[10px] font-bold text-gold-light">
+                              {day}
+                            </span>
+                            <span className="text-xs font-bold text-white truncate">
+                              {cand.name}
+                            </span>
+                            {cand.major && (
+                              <span className="text-[9px] font-bold uppercase text-gold">
+                                ★ Gros Coup
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-zinc-400 mt-1 flex items-center gap-2 flex-wrap">
+                            <span>
+                              {candStatus === 'success'
+                                ? '✅ Déjà validée (sera déplacée sur ' + reschedulingTarget.currentDay + ')'
+                                : candStatus === 'fail'
+                                  ? '❌ Échouée'
+                                  : '⏳ À faire'}
+                            </span>
+                            {!quotaOk && (
+                              <span className="text-amber-300 font-semibold">
+                                ⚠️ Dépasse le quota journalier
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <span className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-gold/15 text-gold-light border border-gold/45 shrink-0">
+                          ⇄ Échanger
+                        </span>
+                      </button>
+                    );
+                  })}
+              </div>
+            </div>
+
+            {/* Option 2 : Déplacer simplement vers un autre jour */}
+            <div className="space-y-2 pt-3 border-t border-bronze/35">
+              <div className="text-xs font-bold text-zinc-200 uppercase tracking-wider flex items-center gap-1.5">
+                <CalendarDays className="w-3.5 h-3.5 text-gold" />
+                2. Ou déplacer simplement vers un autre jour
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                {DAY_NAMES.map((dayName) => {
+                  const isCurrent = dayName === reschedulingTarget.currentDay;
+                  const quota = checkDayQuotaForMission({
+                    missionStates,
+                    scheduleMeta,
+                    mission: reschedulingTarget.mission,
+                    targetDayName: dayName,
+                  });
+                  return (
+                    <button
+                      key={dayName}
+                      type="button"
+                      disabled={isCurrent}
+                      onClick={() => {
+                        onMoveMissionDay(reschedulingTarget.mission.id, dayName);
+                        setReschedulingTarget(null);
+                      }}
+                      className={`px-2.5 py-2 rounded-xl text-left border transition ${
+                        isCurrent
+                          ? 'bg-gold/15 border-gold text-gold-light opacity-75 cursor-default'
+                          : quota.ok
+                            ? 'bg-obsidian/80 hover:bg-slateDark border-bronze/45 hover:border-gold text-white cursor-pointer'
+                            : 'bg-amber-950/30 hover:bg-amber-950/50 border-amber-500/40 text-amber-200 cursor-pointer'
+                      }`}
+                    >
+                      <div className="text-xs font-bold">{dayName}</div>
+                      <div className="text-[10px] text-zinc-400">
+                        {isCurrent
+                          ? 'Jour actuel'
+                          : quota.ok
+                            ? 'Quota OK'
+                            : `Max ${quota.dailyLimit}/j atteint`}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {reschedulingTarget.mission.isRescheduled && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onMoveMissionDay(
+                      reschedulingTarget.mission.id,
+                      reschedulingTarget.mission.originalDay
+                    );
+                    setReschedulingTarget(null);
+                  }}
+                  className="w-full py-2 rounded-xl text-xs font-semibold bg-obsidian hover:bg-slateDark text-zinc-300 border border-zinc-700 transition inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-gold" />
+                  Remettre sur son jour d&apos;origine ({reschedulingTarget.mission.originalDay})
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

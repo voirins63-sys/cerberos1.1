@@ -33,7 +33,7 @@ export const Toast: React.FC<ToastProps> = ({
 
   return (
     <div
-      className={`fixed bottom-5 right-5 z-50 max-w-md transform transition-all duration-300 ${
+      className={`fixed bottom-20 lg:bottom-5 left-3 right-3 sm:left-auto sm:right-5 z-50 sm:max-w-md transform transition-all duration-300 ${
         message ? 'translate-y-0 opacity-100 pointer-events-auto' : 'translate-y-20 opacity-0 pointer-events-none'
       }`}
     >
